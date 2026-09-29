@@ -125,3 +125,17 @@ describe("redaction", () => {
     expect(scrubText("on 2026-09-25", [])).toBe("on 2026-09-25");
   });
 });
+
+describe("starts-with operators and unknown phrasing", () => {
+  const r = rule({ operator: "not_starts_with_any", value: ["NO"], field: "fit" });
+  it("does not trip on a NO later in the text", () => {
+    expect(evaluate([r], { fit: "YES (no restriction stated)" }, "screen").fails).toHaveLength(0);
+    expect(evaluate([r], { fit: "NO (on-site)" }, "screen").fails).toHaveLength(1);
+    expect(evaluate([r], { fit: "NOTABLE" }, "screen").fails).toHaveLength(0);
+  });
+  it("treats 'UNKNOWN (…)' and 'NOT DISCLOSED' as unknown", () => {
+    const f = rule({ operator: "excludes_all", value: ["below floor"], field: "v" });
+    expect(evaluate([f], { v: "UNKNOWN (competitive salary stated)" }, "screen").unknowns).toHaveLength(1);
+    expect(evaluate([rule({})], { value: "Not disclosed" }, "screen").unknowns).toHaveLength(1);
+  });
+});

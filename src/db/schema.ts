@@ -167,7 +167,9 @@ export const rules = sqliteTable(
       .notNull()
       .default("screen"),
     field: text("field").notNull().default(""),
-    operator: text("operator", { enum: ["gte", "lte", "includes_any", "excludes_all", "equals", "note"] }).notNull(),
+    operator: text("operator", {
+      enum: ["gte", "lte", "includes_any", "excludes_all", "starts_with_any", "not_starts_with_any", "equals", "note"],
+    }).notNull(),
     value: text("value", { mode: "json" }).$type<unknown>(),
     /** What a violation does: "reject" archives; "hold" parks the record in Hold. */
     effect: text("effect", { enum: ["reject", "hold"] })

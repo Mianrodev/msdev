@@ -7,12 +7,15 @@
 export const UNKNOWN = "UNKNOWN" as const;
 export type Unknown = typeof UNKNOWN;
 
+/**
+ * True for blank values and for values that *say* they're unknown:
+ * "UNKNOWN", "Unknown (not disclosed)", "NOT DISCLOSED", "N/A".
+ */
 export function isUnknown(v: unknown): boolean {
-  return (
-    v === null ||
-    v === undefined ||
-    (typeof v === "string" && (v.trim() === "" || v.trim().toUpperCase() === UNKNOWN))
-  );
+  if (v === null || v === undefined) return true;
+  if (typeof v !== "string") return false;
+  const s = v.trim().toUpperCase();
+  return s === "" || /^(UNKNOWN|NOT DISCLOSED|NOT STATED|N\/A)(?![A-Z0-9])/.test(s);
 }
 
 /**

@@ -10,7 +10,16 @@
 import { z } from "zod";
 import { isUnknown, STAGES, type DecisionStage, type Stage } from "./types";
 
-export const RULE_OPERATORS = ["gte", "lte", "includes_any", "excludes_all", "equals", "note"] as const;
+export const RULE_OPERATORS = [
+  "gte",
+  "lte",
+  "includes_any",
+  "excludes_all",
+  "starts_with_any",
+  "not_starts_with_any",
+  "equals",
+  "note",
+] as const;
 export type RuleOperator = (typeof RULE_OPERATORS)[number];
 
 export const OPERATOR_LABELS: Record<RuleOperator, string> = {
@@ -18,6 +27,8 @@ export const OPERATOR_LABELS: Record<RuleOperator, string> = {
   lte: "at most (number)",
   includes_any: "must contain one of",
   excludes_all: "must not contain any of",
+  starts_with_any: "must start with one of",
+  not_starts_with_any: "must not start with any of",
   equals: "must equal",
   note: "process note (not evaluated)",
 };
@@ -103,6 +114,14 @@ export function containsTerm(haystack: string, term: string): boolean {
   return new RegExp(`(?<![\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])`, "iu").test(haystack);
 }
 
+/** Case-insensitive: value begins with `term` as a whole word ("NO (on-site)" yes, "NOTABLE" no). */
+export function startsWithTerm(value: string, term: string): boolean {
+  const t = term.trim();
+  if (!t) return false;
+  const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${esc}(?![\\p{L}\\p{N}])`, "iu").test(value.trim());
+}
+
 export function evaluateRule(rule: RuleLike, fields: FieldSource): RuleResult {
   const r = evaluateRuleRaw(rule, fields);
   if (r.outcome === "fail" && rule.effect === "hold") return { ...r, outcome: "hold" };
@@ -154,6 +173,20 @@ function evaluateRuleRaw(rule: RuleLike, fields: FieldSource): RuleResult {
       return hit
         ? { ...base, outcome: "fail", reason: `${rule.field} "${shown}" contains excluded "${hit}"` }
         : { ...base, outcome: "pass", reason: `${rule.field} contains no excluded terms` };
+    }
+    case "starts_with_any":
+    case "not_starts_with_any": {
+      const terms = toList(rule.value);
+      const hit = terms.find((t) => startsWithTerm(shown, t));
+      const wantMatch = rule.operator === "starts_with_any";
+      const ok = wantMatch ? !!hit : !hit;
+      return {
+        ...base,
+        outcome: ok ? "pass" : "fail",
+        reason: hit
+          ? `${rule.field} "${shown}" starts with "${hit}"`
+          : `${rule.field} "${shown}" starts with none of: ${terms.join(", ")}`,
+      };
     }
     case "equals": {
       const want = String(rule.value).trim().toLowerCase();
