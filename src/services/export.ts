@@ -25,14 +25,14 @@ export function toCsv(rows: Record<string, unknown>[]): string {
  * identity terms, emails and phone numbers — safe to hand to a third party.
  * `internal` is everything, for the owner's own backups.
  */
-export function exportRecords(ctx: Ctx, mode: ExportMode, filter: ListFilter = {}) {
+export async function exportRecords(ctx: Ctx, mode: ExportMode, filter: ListFilter = {}) {
   assertCan(ctx.actor, mode === "internal" ? "export.internal" : "export.shared");
-  const terms = getIdentityTerms(ctx);
-  const rows = listRecords(ctx, { ...filter, limit: 100_000 }).map((r) => {
+  const terms = await getIdentityTerms(ctx);
+  const rows = (await listRecords(ctx, { ...filter, limit: 100_000 })).map((r) => {
     const { workspaceId: _w, dedupKey: _d, ...rest } = r;
     return redactRow(rest, RECORD_FIELD_CLASSES, mode, terms);
   });
-  logHistory(ctx, {
+  await logHistory(ctx, {
     entityType: "record",
     event: `export.${mode}`,
     reason: `Exported ${rows.length} records (${mode})`,
@@ -41,14 +41,14 @@ export function exportRecords(ctx: Ctx, mode: ExportMode, filter: ListFilter = {
   return rows;
 }
 
-export function exportAccounts(ctx: Ctx, mode: ExportMode) {
+export async function exportAccounts(ctx: Ctx, mode: ExportMode) {
   assertCan(ctx.actor, mode === "internal" ? "export.internal" : "export.shared");
-  const terms = getIdentityTerms(ctx);
-  const rows = listAccounts(ctx).map((a) => {
+  const terms = await getIdentityTerms(ctx);
+  const rows = (await listAccounts(ctx)).map((a) => {
     const { workspaceId: _w, dedupKey: _d, ...rest } = a;
     return redactRow(rest, TARGET_ACCOUNT_FIELD_CLASSES, mode, terms);
   });
-  logHistory(ctx, {
+  await logHistory(ctx, {
     entityType: "target_account",
     event: `export.${mode}`,
     reason: `Exported ${rows.length} target accounts (${mode})`,

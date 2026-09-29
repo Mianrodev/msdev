@@ -6,22 +6,23 @@
  * authenticated session — services already take a context and scope every
  * query by `ctx.workspaceId`.
  */
-import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { workspaces } from "@/db/schema";
+import type { RuleLike } from "@/core/rules";
 import type { Actor } from "@/core/types";
 
 export interface Ctx {
   db: Db;
   workspaceId: string;
   actor: Actor;
+  /** Optional preloaded active rules, so batch operations don't re-query them per record. */
+  rules?: RuleLike[];
 }
 
 export const DEFAULT_WORKSPACE_ID = "default";
 
-export function ensureWorkspace(db: Db, id = DEFAULT_WORKSPACE_ID, name = "My workspace") {
-  const existing = db.select().from(workspaces).where(eq(workspaces.id, id)).get();
-  if (!existing) db.insert(workspaces).values({ id, name }).run();
+export async function ensureWorkspace(db: Db, id = DEFAULT_WORKSPACE_ID, name = "My workspace") {
+  await db.insert(workspaces).values({ id, name }).onConflictDoNothing();
 }
 
 export function asSystem(ctx: Ctx, process: string): Ctx {

@@ -72,13 +72,14 @@ export function readCell(cell: ExcelJS.Cell): { text: string; link: string | nul
  * @param keyValueSheets sheets with no header row: each row is read as { key, value }
  */
 export async function readWorkbook(
-  file: string,
+  data: Buffer,
   knownHeaders: Record<string, string[][]>,
   urlColumns: Set<string>,
   keyValueSheets: Set<string> = new Set(),
 ): Promise<Sheet[]> {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(file);
+  // exceljs's typings predate Node's generic Buffer; the runtime accepts any Buffer.
+  await wb.xlsx.load(data as unknown as ArrayBuffer);
   const out: Sheet[] = [];
 
   for (const ws of wb.worksheets) {

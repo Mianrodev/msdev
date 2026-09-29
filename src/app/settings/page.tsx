@@ -55,11 +55,11 @@ function RuleTable({ rules, evaluable }: { rules: RuleRow[]; evaluable: boolean 
 
 export default async function SettingsPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
-  const ctx = getCtx();
-  const rules = listRules(ctx);
+  const ctx = (await getCtx());
+  const rules = await listRules(ctx);
   const criteria = rules.filter((r) => r.operator !== "note");
   const notes = rules.filter((r) => r.operator === "note");
-  const terms = getIdentityTerms(ctx);
+  const terms = await getIdentityTerms(ctx);
   return (
     <>
       <Flash sp={sp} />

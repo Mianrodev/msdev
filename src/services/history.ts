@@ -14,8 +14,8 @@ export interface HistoryEntry {
   occurredAt?: string;
 }
 
-export function logHistory(ctx: Ctx, e: HistoryEntry) {
-  ctx.db
+export async function logHistory(ctx: Ctx, e: HistoryEntry) {
+  await ctx.db
     .insert(history)
     .values({
       workspaceId: ctx.workspaceId,
@@ -28,11 +28,10 @@ export function logHistory(ctx: Ctx, e: HistoryEntry) {
       detail: e.detail ?? null,
       actor: actorLabel(ctx.actor),
       ...(e.occurredAt ? { occurredAt: e.occurredAt } : {}),
-    })
-    .run();
+    });
 }
 
-export function listHistory(
+export async function listHistory(
   ctx: Ctx,
   opts: { entityType?: string; entityId?: string; event?: string; limit?: number } = {},
 ) {
@@ -45,6 +44,5 @@ export function listHistory(
     .from(history)
     .where(and(...conds))
     .orderBy(desc(history.id))
-    .limit(opts.limit ?? 500)
-    .all();
+    .limit(opts.limit ?? 500);
 }

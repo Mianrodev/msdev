@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, like, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { records, type RecordRow } from "@/db/schema";
@@ -86,18 +86,19 @@ function scope(ctx: Ctx, id: string) {
   return and(eq(records.workspaceId, ctx.workspaceId), eq(records.id, id));
 }
 
-export function getRecord(ctx: Ctx, id: string): RecordRow {
-  const r = ctx.db.select().from(records).where(scope(ctx, id)).get();
+export async function getRecord(ctx: Ctx, id: string): Promise<RecordRow> {
+  const [r] = await ctx.db.select().from(records).where(scope(ctx, id)).limit(1);
   if (!r) throw new NotFoundError(`Record ${id} not found`);
   return r;
 }
 
-export function findByDedupKey(ctx: Ctx, key: string) {
-  return ctx.db
+export async function findByDedupKey(ctx: Ctx, key: string): Promise<RecordRow | undefined> {
+  const [r] = await ctx.db
     .select()
     .from(records)
     .where(and(eq(records.workspaceId, ctx.workspaceId), eq(records.dedupKey, key)))
-    .get();
+    .limit(1);
+  return r;
 }
 
 /** Blank → null, "unknown" → UNKNOWN. Never invents a value. */
@@ -155,24 +156,23 @@ export interface UpsertResult {
  * (account, opportunity, source/next-step URL): a repeat updates the existing
  * record in place and is logged, never duplicated.
  */
-export function upsertLead(ctx: Ctx, input: RecordInput, origin = "manual"): UpsertResult {
+export async function upsertLead(ctx: Ctx, input: RecordInput, origin = "manual"): Promise<UpsertResult> {
   assertCan(ctx.actor, "record.write");
   const data = recordInputSchema.parse(input);
   const account = clean(data.account) ?? "UNKNOWN";
   const opportunity = clean(data.opportunity) ?? "UNKNOWN";
   const key = dedupKey({ account, opportunity, sourceUrl: data.sourceUrl, nextStepUrl: data.nextStepUrl });
-  const existing = findByDedupKey(ctx, key);
+  const existing = await findByDedupKey(ctx, key);
 
   if (existing) {
     const { patch, changed } = mergePatch(existing, data);
     if (changed.length) {
-      ctx.db
+      await ctx.db
         .update(records)
         .set({ ...patch, updatedAt: nowIso() })
-        .where(scope(ctx, existing.id))
-        .run();
+        .where(scope(ctx, existing.id));
     }
-    logHistory(ctx, {
+    await logHistory(ctx, {
       entityType: "record",
       entityId: existing.id,
       event: "dedup_merge",
@@ -183,12 +183,12 @@ export function upsertLead(ctx: Ctx, input: RecordInput, origin = "manual"): Ups
         : "Repeat of existing record; no new information",
       detail: { origin, changed },
     });
-    return { record: getRecord(ctx, existing.id), created: false, changed };
+    return { record: await getRecord(ctx, existing.id), created: false, changed };
   }
 
   const id = randomUUID();
   const { patch } = mergePatch(undefined, data);
-  ctx.db
+  await ctx.db
     .insert(records)
     .values({
       ...patch,
@@ -199,22 +199,21 @@ export function upsertLead(ctx: Ctx, input: RecordInput, origin = "manual"): Ups
       opportunity,
       dateFound: clean(data.dateFound) ?? new Date().toISOString().slice(0, 10),
       origin,
-    })
-    .run();
-  logHistory(ctx, {
+    });
+  await logHistory(ctx, {
     entityType: "record",
     entityId: id,
     event: "created",
     newStatus: "active",
     reason: `Discovered (${origin})`,
   });
-  return { record: getRecord(ctx, id), created: true, changed: [] };
+  return { record: await getRecord(ctx, id), created: true, changed: [] };
 }
 
 /** Edit descriptive fields. Changing identity fields re-checks for duplicates. */
-export function updateRecord(ctx: Ctx, id: string, input: RecordInput, reason = ""): RecordRow {
+export async function updateRecord(ctx: Ctx, id: string, input: RecordInput, reason = ""): Promise<RecordRow> {
   assertCan(ctx.actor, "record.write");
-  const existing = getRecord(ctx, id);
+  const existing = await getRecord(ctx, id);
   const data = recordInputSchema.parse(input);
   const patch: Partial<RecordRow> = {};
   const changed: string[] = [];
@@ -240,18 +239,17 @@ export function updateRecord(ctx: Ctx, id: string, input: RecordInput, reason = 
   const merged = { ...existing, ...patch };
   const key = dedupKey(merged);
   if (key !== existing.dedupKey) {
-    const clash = findByDedupKey(ctx, key);
+    const clash = await findByDedupKey(ctx, key);
     if (clash && clash.id !== id) {
       throw new ConflictError(`Another record already has this account/opportunity/URL (${clash.id})`);
     }
     patch.dedupKey = key;
   }
-  ctx.db
+  await ctx.db
     .update(records)
     .set({ ...patch, updatedAt: nowIso() })
-    .where(scope(ctx, id))
-    .run();
-  logHistory(ctx, {
+    .where(scope(ctx, id));
+  await logHistory(ctx, {
     entityType: "record",
     entityId: id,
     event: "updated",
@@ -260,7 +258,7 @@ export function updateRecord(ctx: Ctx, id: string, input: RecordInput, reason = 
     reason: reason || `Edited: ${changed.join(", ")}`,
     detail: { changed },
   });
-  return getRecord(ctx, id);
+  return await getRecord(ctx, id);
 }
 
 // ---------------------------------------------------------------- pipeline
@@ -276,22 +274,22 @@ export function fieldsFor(r: RecordRow): Record<string, unknown> {
   };
 }
 
-export function evaluateRecord(ctx: Ctx, r: RecordRow, stage: DecisionStage | "all"): Evaluation {
-  return evaluate(activeRules(ctx), fieldsFor(r), stage);
+export async function evaluateRecord(ctx: Ctx, r: RecordRow, stage: DecisionStage | "all"): Promise<Evaluation> {
+  return evaluate(ctx.rules ?? (await activeRules(ctx)), fieldsFor(r), stage);
 }
 
-export function pendingDecision(ctx: Ctx, r: RecordRow) {
+export async function pendingDecision(ctx: Ctx, r: RecordRow) {
   const stage = nextStage(r.stage);
   if (!stage || r.status !== "active") return null;
-  const evaluation = evaluateRecord(ctx, r, stage);
+  const evaluation = await evaluateRecord(ctx, r, stage);
   return { stage, evaluation, suggested: suggestVerdict(stage, evaluation, r.sourceVerification) };
 }
 
 /** Apply a stage decision (Screen, Triage or Verify). Writes verdict + reason and logs to History. */
-export function decideStage(ctx: Ctx, id: string, decision: Decision): RecordRow {
+export async function decideStage(ctx: Ctx, id: string, decision: Decision): Promise<RecordRow> {
   assertCan(ctx.actor, "record.decide");
-  const r = getRecord(ctx, id);
-  const evaluation = evaluateRecord(ctx, r, decision.stage);
+  const r = await getRecord(ctx, id);
+  const evaluation = await evaluateRecord(ctx, r, decision.stage);
   const out = decide(r, decision, evaluation);
   const ts = nowIso();
   const prefix = decision.stage; // screen | triage | verify
@@ -309,8 +307,8 @@ export function decideStage(ctx: Ctx, id: string, decision: Decision): RecordRow
   if (out.status === "archived") Object.assign(patch, { archiveReason: out.archiveReason, archivedAt: ts });
   if (out.stage === "verify" && out.status === "active") patch.lastReconciledAt = ts;
 
-  ctx.db.update(records).set(patch).where(scope(ctx, id)).run();
-  logHistory(ctx, {
+  await ctx.db.update(records).set(patch).where(scope(ctx, id));
+  await logHistory(ctx, {
     entityType: "record",
     entityId: id,
     event: `stage.${decision.stage}`,
@@ -323,10 +321,10 @@ export function decideStage(ctx: Ctx, id: string, decision: Decision): RecordRow
       criteria: evaluation.results,
     },
   });
-  return getRecord(ctx, id);
+  return await getRecord(ctx, id);
 }
 
-function setStatus(
+async function setStatus(
   ctx: Ctx,
   id: string,
   to: "active" | "hold" | "archived",
@@ -335,14 +333,14 @@ function setStatus(
   event = `status.${to}`,
 ) {
   if (!reason.trim()) throw new Error("A reason is required");
-  const r = getRecord(ctx, id);
+  const r = await getRecord(ctx, id);
   if (r.status === to && event === `status.${to}`) return r;
   const ts = nowIso();
   const patch: Partial<RecordRow> = { status: to, updatedAt: ts, ...extra };
   if (to === "hold") Object.assign(patch, { holdReason: reason.trim(), holdSince: ts });
   if (to === "archived") Object.assign(patch, { archiveReason: reason.trim(), archivedAt: ts });
-  ctx.db.update(records).set(patch).where(scope(ctx, id)).run();
-  logHistory(ctx, {
+  await ctx.db.update(records).set(patch).where(scope(ctx, id));
+  await logHistory(ctx, {
     entityType: "record",
     entityId: id,
     event,
@@ -350,18 +348,18 @@ function setStatus(
     newStatus: `${patch.stage ?? r.stage}/${to}`,
     reason: reason.trim(),
   });
-  return getRecord(ctx, id);
+  return await getRecord(ctx, id);
 }
 
-export function holdRecord(ctx: Ctx, id: string, reason: string, nextAction?: string) {
+export async function holdRecord(ctx: Ctx, id: string, reason: string, nextAction?: string) {
   assertCan(ctx.actor, "record.write");
-  return setStatus(ctx, id, "hold", reason, nextAction ? { nextAction } : {});
+  return await setStatus(ctx, id, "hold", reason, nextAction ? { nextAction } : {});
 }
 
 /** Archive instead of delete. Rejected and closed items land here. */
-export function archiveRecord(ctx: Ctx, id: string, reason: string) {
+export async function archiveRecord(ctx: Ctx, id: string, reason: string) {
   assertCan(ctx.actor, "record.archive");
-  return setStatus(ctx, id, "archived", reason);
+  return await setStatus(ctx, id, "archived", reason);
 }
 
 /**
@@ -369,11 +367,11 @@ export function archiveRecord(ctx: Ctx, id: string, reason: string) {
  * A verified prospect only comes back if it still passes the current criteria
  * and its source is verified — restore is not a way around the rules.
  */
-export function restoreRecord(ctx: Ctx, id: string, reason: string) {
+export async function restoreRecord(ctx: Ctx, id: string, reason: string) {
   assertCan(ctx.actor, "record.write");
-  const r = getRecord(ctx, id);
+  const r = await getRecord(ctx, id);
   if (r.stage === "verify") {
-    const ev = evaluateRecord(ctx, r, "all");
+    const ev = await evaluateRecord(ctx, r, "all");
     const blockers = [...ev.fails, ...ev.holds];
     if (blockers.length) {
       throw new PipelineError(`Cannot restore as a prospect: ${blockers.map((f) => f.reason).join("; ")}`);
@@ -382,16 +380,16 @@ export function restoreRecord(ctx: Ctx, id: string, reason: string) {
       throw new PipelineError(`Cannot restore as a prospect: source is ${r.sourceVerification}`);
     }
   }
-  return setStatus(ctx, id, "active", reason, {}, "status.restored");
+  return await setStatus(ctx, id, "active", reason, {}, "status.restored");
 }
 
-export function setSourceVerification(ctx: Ctx, id: string, value: SourceVerification, reason: string) {
+export async function setSourceVerification(ctx: Ctx, id: string, value: SourceVerification, reason: string) {
   assertCan(ctx.actor, "record.write");
   if (!SOURCE_VERIFICATION.includes(value)) throw new Error("Invalid source verification");
-  const r = getRecord(ctx, id);
+  const r = await getRecord(ctx, id);
   if (r.sourceVerification === value) return r;
-  ctx.db.update(records).set({ sourceVerification: value, updatedAt: nowIso() }).where(scope(ctx, id)).run();
-  logHistory(ctx, {
+  await ctx.db.update(records).set({ sourceVerification: value, updatedAt: nowIso() }).where(scope(ctx, id));
+  await logHistory(ctx, {
     entityType: "record",
     entityId: id,
     event: "source_verification",
@@ -399,17 +397,17 @@ export function setSourceVerification(ctx: Ctx, id: string, value: SourceVerific
     newStatus: value,
     reason: reason.trim() || `Source marked ${value}`,
   });
-  return getRecord(ctx, id);
+  return await getRecord(ctx, id);
 }
 
-export function setFitTier(ctx: Ctx, id: string, tier: FitTier | null, reason: string) {
+export async function setFitTier(ctx: Ctx, id: string, tier: FitTier | null, reason: string) {
   assertCan(ctx.actor, "record.decide");
   if (tier !== null && !FIT_TIERS.includes(tier)) throw new Error("Invalid tier");
   if (!reason.trim()) throw new Error("A reason is required");
-  const r = getRecord(ctx, id);
+  const r = await getRecord(ctx, id);
   if (r.fitTier === tier) return r;
-  ctx.db.update(records).set({ fitTier: tier, updatedAt: nowIso() }).where(scope(ctx, id)).run();
-  logHistory(ctx, {
+  await ctx.db.update(records).set({ fitTier: tier, updatedAt: nowIso() }).where(scope(ctx, id));
+  await logHistory(ctx, {
     entityType: "record",
     entityId: id,
     event: "fit_tier",
@@ -417,10 +415,10 @@ export function setFitTier(ctx: Ctx, id: string, tier: FitTier | null, reason: s
     newStatus: tier,
     reason: reason.trim(),
   });
-  return getRecord(ctx, id);
+  return await getRecord(ctx, id);
 }
 
-export function setOutreachStatus(
+export async function setOutreachStatus(
   ctx: Ctx,
   id: string,
   to: OutreachStatus,
@@ -428,10 +426,10 @@ export function setOutreachStatus(
 ) {
   if (!OUTREACH_STATUSES.includes(to)) throw new Error("Invalid outreach status");
   assertOutreachChange(ctx.actor, to, opts.humanConfirmed);
-  const r = getRecord(ctx, id);
+  const r = await getRecord(ctx, id);
   if (r.outreachStatus === to) return r;
-  ctx.db.update(records).set({ outreachStatus: to, updatedAt: nowIso() }).where(scope(ctx, id)).run();
-  logHistory(ctx, {
+  await ctx.db.update(records).set({ outreachStatus: to, updatedAt: nowIso() }).where(scope(ctx, id));
+  await logHistory(ctx, {
     entityType: "record",
     entityId: id,
     event: "outreach",
@@ -440,7 +438,7 @@ export function setOutreachStatus(
     reason: opts.reason?.trim() || `Outreach status → ${to}`,
     detail: { humanConfirmed: opts.humanConfirmed },
   });
-  return getRecord(ctx, id);
+  return await getRecord(ctx, id);
 }
 
 // ---------------------------------------------------------------- queries
@@ -493,7 +491,7 @@ export function viewCondition(view: View): SQL | undefined {
   }
 }
 
-export function listRecords(ctx: Ctx, f: ListFilter = {}): RecordRow[] {
+export async function listRecords(ctx: Ctx, f: ListFilter = {}): Promise<RecordRow[]> {
   const conds: (SQL | undefined)[] = [eq(records.workspaceId, ctx.workspaceId), viewCondition(f.view ?? "all")];
   if (f.stage) conds.push(eq(records.stage, f.stage as RecordRow["stage"]));
   if (f.status) conds.push(eq(records.status, f.status as RecordRow["status"]));
@@ -501,7 +499,7 @@ export function listRecords(ctx: Ctx, f: ListFilter = {}): RecordRow[] {
   if (f.q?.trim()) {
     const q = `%${f.q.trim()}%`;
     conds.push(
-      or(like(records.account, q), like(records.opportunity, q), like(records.location, q), like(records.notes, q)),
+      or(ilike(records.account, q), ilike(records.opportunity, q), ilike(records.location, q), ilike(records.notes, q)),
     );
   }
   const col = SORTABLE[f.sort ?? "updated"] ?? records.updatedAt;
@@ -512,27 +510,26 @@ export function listRecords(ctx: Ctx, f: ListFilter = {}): RecordRow[] {
     .where(and(...conds))
     .orderBy(order, desc(records.updatedAt))
     .limit(f.limit ?? 1000)
-    .all();
+    ;
 }
 
-export function countsByView(ctx: Ctx): Record<View, number> {
+export async function countsByView(ctx: Ctx): Promise<Record<View, number>> {
   const out = {} as Record<View, number>;
   for (const v of Object.keys(VIEWS) as View[]) {
-    const row = ctx.db
-      .select({ n: sql<number>`count(*)` })
+    const [row] = await ctx.db
+      .select({ n: sql<number>`count(*)::int` })
       .from(records)
-      .where(and(eq(records.workspaceId, ctx.workspaceId), viewCondition(v)))
-      .get();
+      .where(and(eq(records.workspaceId, ctx.workspaceId), viewCondition(v)));
     out[v] = row?.n ?? 0;
   }
   return out;
 }
 
-export function countsByStage(ctx: Ctx) {
+export async function countsByStage(ctx: Ctx) {
   return ctx.db
-    .select({ stage: records.stage, status: records.status, n: sql<number>`count(*)` })
+    .select({ stage: records.stage, status: records.status, n: sql<number>`count(*)::int` })
     .from(records)
     .where(eq(records.workspaceId, ctx.workspaceId))
     .groupBy(records.stage, records.status)
-    .all();
+    ;
 }

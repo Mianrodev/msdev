@@ -1,4 +1,4 @@
-import { and, asc, eq, like, or, type SQL } from "drizzle-orm";
+import { and, asc, eq, ilike, or, type SQL } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { targetAccounts, type TargetAccountRow } from "@/db/schema";
@@ -60,23 +60,23 @@ const clean = (v: unknown) => {
   return s ? s : null;
 };
 
-export function getAccount(ctx: Ctx, id: string): TargetAccountRow {
-  const r = ctx.db.select().from(targetAccounts).where(scope(ctx, id)).get();
+export async function getAccount(ctx: Ctx, id: string): Promise<TargetAccountRow> {
+  const [r] = await ctx.db.select().from(targetAccounts).where(scope(ctx, id)).limit(1);
   if (!r) throw new NotFoundError(`Target account ${id} not found`);
   return r;
 }
 
 /** Create, or update in place when (name, website host) already exists. */
-export function upsertAccount(ctx: Ctx, input: AccountInput, origin = "manual") {
+export async function upsertAccount(ctx: Ctx, input: AccountInput, origin = "manual") {
   assertCan(ctx.actor, "record.write");
   const data = accountInputSchema.parse(input);
   const name = clean(data.name) ?? "UNKNOWN";
   const key = accountKey({ name, website: data.website, sourceUrl: data.sourceUrl });
-  const existing = ctx.db
+  const [existing] = await ctx.db
     .select()
     .from(targetAccounts)
     .where(and(eq(targetAccounts.workspaceId, ctx.workspaceId), eq(targetAccounts.dedupKey, key)))
-    .get();
+    .limit(1);
 
   const patch: Partial<TargetAccountRow> = {};
   const changed: string[] = [];
@@ -93,9 +93,9 @@ export function upsertAccount(ctx: Ctx, input: AccountInput, origin = "manual") 
 
   if (existing) {
     if (changed.length || patch.extra || patch.attributes) {
-      ctx.db.update(targetAccounts).set({ ...patch, updatedAt: new Date().toISOString() }).where(scope(ctx, existing.id)).run();
+      await ctx.db.update(targetAccounts).set({ ...patch, updatedAt: new Date().toISOString() }).where(scope(ctx, existing.id));
     }
-    logHistory(ctx, {
+    await logHistory(ctx, {
       entityType: "target_account",
       entityId: existing.id,
       event: "dedup_merge",
@@ -103,20 +103,19 @@ export function upsertAccount(ctx: Ctx, input: AccountInput, origin = "manual") 
       newStatus: existing.status,
       reason: changed.length ? `Repeat; updated in place: ${changed.join(", ")}` : "Repeat; no new information",
     });
-    return { account: getAccount(ctx, existing.id), created: false };
+    return { account: await getAccount(ctx, existing.id), created: false };
   }
   const id = randomUUID();
-  ctx.db
+  await ctx.db
     .insert(targetAccounts)
-    .values({ ...patch, id, workspaceId: ctx.workspaceId, dedupKey: key, name, origin })
-    .run();
-  logHistory(ctx, { entityType: "target_account", entityId: id, event: "created", newStatus: "tracking", reason: `Added (${origin})` });
-  return { account: getAccount(ctx, id), created: true };
+    .values({ ...patch, id, workspaceId: ctx.workspaceId, dedupKey: key, name, origin });
+  await logHistory(ctx, { entityType: "target_account", entityId: id, event: "created", newStatus: "tracking", reason: `Added (${origin})` });
+  return { account: await getAccount(ctx, id), created: true };
 }
 
-export function updateAccount(ctx: Ctx, id: string, input: AccountInput, reason = "") {
+export async function updateAccount(ctx: Ctx, id: string, input: AccountInput, reason = "") {
   assertCan(ctx.actor, "record.write");
-  const existing = getAccount(ctx, id);
+  const existing = await getAccount(ctx, id);
   const data = accountInputSchema.parse(input);
   const patch: Partial<TargetAccountRow> = {};
   const changed: string[] = [];
@@ -131,16 +130,16 @@ export function updateAccount(ctx: Ctx, id: string, input: AccountInput, reason 
   if (!changed.length) return existing;
   const key = accountKey({ ...existing, ...patch });
   if (key !== existing.dedupKey) {
-    const clash = ctx.db
+    const [clash] = await ctx.db
       .select()
       .from(targetAccounts)
       .where(and(eq(targetAccounts.workspaceId, ctx.workspaceId), eq(targetAccounts.dedupKey, key)))
-      .get();
+      .limit(1);
     if (clash && clash.id !== id) throw new ConflictError("Another target account has this name/website");
     patch.dedupKey = key;
   }
-  ctx.db.update(targetAccounts).set({ ...patch, updatedAt: new Date().toISOString() }).where(scope(ctx, id)).run();
-  logHistory(ctx, {
+  await ctx.db.update(targetAccounts).set({ ...patch, updatedAt: new Date().toISOString() }).where(scope(ctx, id));
+  await logHistory(ctx, {
     entityType: "target_account",
     entityId: id,
     event: "updated",
@@ -149,20 +148,19 @@ export function updateAccount(ctx: Ctx, id: string, input: AccountInput, reason 
     reason: reason || `Edited: ${changed.join(", ")}`,
     detail: { changed },
   });
-  return getAccount(ctx, id);
+  return await getAccount(ctx, id);
 }
 
-export function setAccountStatus(ctx: Ctx, id: string, to: TargetAccountStatus, reason: string) {
+export async function setAccountStatus(ctx: Ctx, id: string, to: TargetAccountStatus, reason: string) {
   assertCan(ctx.actor, to === "archived" ? "record.archive" : "record.write");
   if (!reason.trim()) throw new Error("A reason is required");
-  const a = getAccount(ctx, id);
+  const a = await getAccount(ctx, id);
   if (a.status === to) return a;
-  ctx.db
+  await ctx.db
     .update(targetAccounts)
     .set({ status: to, archiveReason: to === "archived" ? reason.trim() : a.archiveReason, updatedAt: new Date().toISOString() })
-    .where(scope(ctx, id))
-    .run();
-  logHistory(ctx, {
+    .where(scope(ctx, id));
+  await logHistory(ctx, {
     entityType: "target_account",
     entityId: id,
     event: `status.${to}`,
@@ -170,15 +168,15 @@ export function setAccountStatus(ctx: Ctx, id: string, to: TargetAccountStatus, 
     newStatus: to,
     reason: reason.trim(),
   });
-  return getAccount(ctx, id);
+  return await getAccount(ctx, id);
 }
 
-export function listAccounts(ctx: Ctx, f: { status?: string; q?: string } = {}) {
+export async function listAccounts(ctx: Ctx, f: { status?: string; q?: string } = {}) {
   const conds: SQL[] = [eq(targetAccounts.workspaceId, ctx.workspaceId)];
   if (f.status) conds.push(eq(targetAccounts.status, f.status as TargetAccountStatus));
   if (f.q?.trim()) {
     const q = `%${f.q.trim()}%`;
-    conds.push(or(like(targetAccounts.name, q), like(targetAccounts.description, q))!);
+    conds.push(or(ilike(targetAccounts.name, q), ilike(targetAccounts.description, q))!);
   }
-  return ctx.db.select().from(targetAccounts).where(and(...conds)).orderBy(asc(targetAccounts.name)).all();
+  return ctx.db.select().from(targetAccounts).where(and(...conds)).orderBy(asc(targetAccounts.name));
 }

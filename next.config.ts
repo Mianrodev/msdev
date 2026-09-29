@@ -1,8 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["better-sqlite3"],
-  // Local-only v1: server actions are accepted from localhost only (Next's default origin check).
+  // PGlite (local embedded Postgres) ships WASM files; keep it out of the bundle.
+  serverExternalPackages: ["@electric-sql/pglite"],
+  experimental: {
+    // Room for uploading the tracker workbook.
+    serverActions: { bodySizeLimit: "10mb" },
+  },
 };
 
 export default nextConfig;

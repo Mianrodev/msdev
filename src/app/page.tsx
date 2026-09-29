@@ -11,11 +11,11 @@ export const dynamic = "force-dynamic";
 
 export default async function Dashboard({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
-  const ctx = getCtx();
-  const views = countsByView(ctx);
-  const matrix = countsByStage(ctx);
-  const runs = listRuns(ctx, 5);
-  const accounts = listAccounts(ctx);
+  const ctx = (await getCtx());
+  const views = await countsByView(ctx);
+  const matrix = await countsByStage(ctx);
+  const runs = await listRuns(ctx, 5);
+  const accounts = await listAccounts(ctx);
   const cell = (stage: string, status: string) => matrix.find((m) => m.stage === stage && m.status === status)?.n ?? 0;
 
   return (

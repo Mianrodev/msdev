@@ -89,4 +89,7 @@ async function main() {
   console.log(`Wrote ${OUT}`);
 }
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

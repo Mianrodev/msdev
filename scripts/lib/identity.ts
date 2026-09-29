@@ -8,7 +8,7 @@ import path from "node:path";
 import type { Ctx } from "../../src/services/context";
 import { getIdentityTerms, IDENTITY_TERMS_KEY, setSetting } from "../../src/services/rules";
 
-export function syncIdentityTerms(ctx: Ctx, file = process.env.IDENTITY_FILE ?? "data/identity.local.json") {
+export async function syncIdentityTerms(ctx: Ctx, file = process.env.IDENTITY_FILE ?? "data/identity.local.json") {
   const abs = path.resolve(process.cwd(), file);
   if (!fs.existsSync(abs)) return null;
   const json = JSON.parse(fs.readFileSync(abs, "utf8")) as Record<string, unknown>;
@@ -20,9 +20,9 @@ export function syncIdentityTerms(ctx: Ctx, file = process.env.IDENTITY_FILE ?? 
     }
   }
   const next = [...terms].sort((a, b) => b.length - a.length); // longest first so full names win
-  const current = getIdentityTerms(ctx);
+  const current = await getIdentityTerms(ctx);
   if (JSON.stringify(current) !== JSON.stringify(next)) {
-    setSetting(ctx, IDENTITY_TERMS_KEY, next, `Loaded ${next.length} identity terms from local file`);
+    await setSetting(ctx, IDENTITY_TERMS_KEY, next, `Loaded ${next.length} identity terms from local file`);
   }
   return next.length;
 }

@@ -34,10 +34,10 @@ function withMessage(path: string, key: "ok" | "error", msg: string) {
 }
 
 /** Run `fn`; redirect back to `path` with ?ok= or ?error=. */
-async function act(path: string, fn: () => string | void, okPath?: (r: string | void) => string) {
+async function act(path: string, fn: () => Promise<string | void>, okPath?: (r: string | void) => string) {
   let target: string;
   try {
-    const r = fn();
+    const r = await fn();
     revalidatePath("/", "layout");
     target = okPath ? okPath(r) : withMessage(path, "ok", typeof r === "string" ? r : "Saved");
   } catch (e) {
@@ -90,12 +90,10 @@ function recordInput(f: FormData): RecordInput {
 // ---------------------------------------------------------------- records
 
 export async function createLeadAction(f: FormData) {
-  const ctx = getCtx();
+  const ctx = await getCtx();
   let id = "";
-  await act(
-    "/records/new",
-    () => {
-      const r = upsertLead(ctx, recordInput(f));
+  await act("/records/new", async () => {
+      const r = await upsertLead(ctx, recordInput(f));
       id = r.record.id;
       return r.created ? "Lead created" : "Already existed — updated in place";
     },
@@ -104,18 +102,18 @@ export async function createLeadAction(f: FormData) {
 }
 
 export async function updateRecordAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/records/${id}`, () => {
-    updateRecord(ctx, id, recordInput(f), str(f, "reason"));
+  const ctx = await getCtx();
+  await act(`/records/${id}`, async () => {
+    await updateRecord(ctx, id, recordInput(f), str(f, "reason"));
     return "Saved";
   });
 }
 
 export async function decideAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/records/${id}`, () => {
+  const ctx = await getCtx();
+  await act(`/records/${id}`, async () => {
     const conf = str(f, "confidence").trim();
-    const r = decideStage(ctx, id, {
+    const r = await decideStage(ctx, id, {
       stage: str(f, "stage") as DecisionStage,
       verdict: str(f, "verdict"),
       reason: str(f, "reason"),
@@ -126,38 +124,38 @@ export async function decideAction(id: string, f: FormData) {
 }
 
 export async function holdAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/records/${id}`, () => void holdRecord(ctx, id, str(f, "reason"), str(f, "nextAction") || undefined));
+  const ctx = await getCtx();
+  await act(`/records/${id}`, async () => void await holdRecord(ctx, id, str(f, "reason"), str(f, "nextAction") || undefined));
 }
 
 export async function archiveAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/records/${id}`, () => void archiveRecord(ctx, id, str(f, "reason")));
+  const ctx = await getCtx();
+  await act(`/records/${id}`, async () => void await archiveRecord(ctx, id, str(f, "reason")));
 }
 
 export async function restoreAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/records/${id}`, () => void restoreRecord(ctx, id, str(f, "reason")));
+  const ctx = await getCtx();
+  await act(`/records/${id}`, async () => void await restoreRecord(ctx, id, str(f, "reason")));
 }
 
 export async function sourceVerificationAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/records/${id}`, () =>
-    void setSourceVerification(ctx, id, str(f, "value") as SourceVerification, str(f, "reason")),
+  const ctx = await getCtx();
+  await act(`/records/${id}`, async () =>
+    void await setSourceVerification(ctx, id, str(f, "value") as SourceVerification, str(f, "reason")),
   );
 }
 
 export async function fitTierAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/records/${id}`, () =>
-    void setFitTier(ctx, id, (str(f, "tier") || null) as FitTier | null, str(f, "reason")),
+  const ctx = await getCtx();
+  await act(`/records/${id}`, async () =>
+    void await setFitTier(ctx, id, (str(f, "tier") || null) as FitTier | null, str(f, "reason")),
   );
 }
 
 export async function outreachAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/records/${id}`, () =>
-    void setOutreachStatus(ctx, id, str(f, "status") as OutreachStatus, {
+  const ctx = await getCtx();
+  await act(`/records/${id}`, async () =>
+    void await setOutreachStatus(ctx, id, str(f, "status") as OutreachStatus, {
       humanConfirmed: f.get("confirm") === "on",
       reason: str(f, "reason"),
     }),
@@ -167,14 +165,14 @@ export async function outreachAction(id: string, f: FormData) {
 // ---------------------------------------------------------------- pipeline
 
 export async function runUpdateAction() {
-  const ctx = getCtx();
-  await act("/", () => formatSummary(runUpdate(ctx)));
+  const ctx = await getCtx();
+  await act("/", async () => formatSummary(await runUpdate(ctx)));
 }
 
 export async function reconcileAction() {
-  const ctx = getCtx();
-  await act("/", () => {
-    const r = runReconciliation(ctx);
+  const ctx = await getCtx();
+  await act("/", async () => {
+    const r = await runReconciliation(ctx);
     return `Reconciled ${r.prospectsChecked} prospects + ${r.heldChecked} held: kept ${r.kept}, to Hold ${r.held}, to Archive ${r.archived}`;
   });
 }
@@ -206,12 +204,10 @@ function accountInput(f: FormData) {
 }
 
 export async function createAccountAction(f: FormData) {
-  const ctx = getCtx();
+  const ctx = await getCtx();
   let id = "";
-  await act(
-    "/accounts/new",
-    () => {
-      const r = upsertAccount(ctx, accountInput(f));
+  await act("/accounts/new", async () => {
+      const r = await upsertAccount(ctx, accountInput(f));
       id = r.account.id;
       return r.created ? "Target account created" : "Already existed — updated in place";
     },
@@ -220,14 +216,14 @@ export async function createAccountAction(f: FormData) {
 }
 
 export async function updateAccountAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/accounts/${id}`, () => void updateAccount(ctx, id, accountInput(f), str(f, "reason")));
+  const ctx = await getCtx();
+  await act(`/accounts/${id}`, async () => void await updateAccount(ctx, id, accountInput(f), str(f, "reason")));
 }
 
 export async function accountStatusAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/accounts/${id}`, () =>
-    void setAccountStatus(ctx, id, str(f, "status") as "tracking" | "hold" | "archived", str(f, "reason")),
+  const ctx = await getCtx();
+  await act(`/accounts/${id}`, async () =>
+    void await setAccountStatus(ctx, id, str(f, "status") as "tracking" | "hold" | "archived", str(f, "reason")),
   );
 }
 
@@ -259,28 +255,28 @@ function ruleInput(f: FormData): RuleInput {
 }
 
 export async function createRuleAction(f: FormData) {
-  const ctx = getCtx();
-  await act("/settings", () => void createRule(ctx, ruleInput(f)));
+  const ctx = await getCtx();
+  await act("/settings", async () => void await createRule(ctx, ruleInput(f)));
 }
 
 export async function updateRuleAction(id: string, f: FormData) {
-  const ctx = getCtx();
-  await act(`/settings/rules/${id}`, () => void updateRule(ctx, id, ruleInput(f), str(f, "reason")));
+  const ctx = await getCtx();
+  await act(`/settings/rules/${id}`, async () => void await updateRule(ctx, id, ruleInput(f), str(f, "reason")));
 }
 
 export async function toggleRuleAction(id: string, enabled: boolean) {
-  const ctx = getCtx();
-  await act("/settings", () => void setRuleEnabled(ctx, id, enabled, enabled ? "Enabled" : "Disabled"));
+  const ctx = await getCtx();
+  await act("/settings", async () => void await setRuleEnabled(ctx, id, enabled, enabled ? "Enabled" : "Disabled"));
 }
 
 export async function identityTermsAction(f: FormData) {
-  const ctx = getCtx();
-  await act("/settings", () => {
+  const ctx = await getCtx();
+  await act("/settings", async () => {
     const terms = str(f, "terms")
       .split("\n")
       .map((s) => s.trim())
       .filter((s) => s.length >= 2);
-    setSetting(ctx, IDENTITY_TERMS_KEY, terms, "Identity terms updated in Settings");
+    await setSetting(ctx, IDENTITY_TERMS_KEY, terms, "Identity terms updated in Settings");
     return `${terms.length} identity terms saved`;
   });
 }

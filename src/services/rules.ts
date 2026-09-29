@@ -6,36 +6,35 @@ import { ruleInputSchema, type RuleInput, type RuleLike } from "@/core/rules";
 import type { Ctx } from "./context";
 import { logHistory } from "./history";
 
-export function listRules(ctx: Ctx): RuleRow[] {
+export async function listRules(ctx: Ctx): Promise<RuleRow[]> {
   return ctx.db
     .select()
     .from(rules)
     .where(eq(rules.workspaceId, ctx.workspaceId))
-    .orderBy(asc(rules.appliesFrom), asc(rules.key))
-    .all();
+    .orderBy(asc(rules.appliesFrom), asc(rules.key));
 }
 
-export function activeRules(ctx: Ctx): RuleLike[] {
-  return listRules(ctx).filter((r) => r.enabled) as RuleLike[];
+export async function activeRules(ctx: Ctx): Promise<RuleLike[]> {
+  return (await listRules(ctx)).filter((r) => r.enabled) as RuleLike[];
 }
 
-export function getRule(ctx: Ctx, id: string) {
-  return ctx.db
+export async function getRule(ctx: Ctx, id: string): Promise<RuleRow | undefined> {
+  const [r] = await ctx.db
     .select()
     .from(rules)
     .where(and(eq(rules.workspaceId, ctx.workspaceId), eq(rules.id, id)))
-    .get();
+    .limit(1);
+  return r;
 }
 
-export function createRule(ctx: Ctx, input: RuleInput, origin = "manual"): RuleRow {
+export async function createRule(ctx: Ctx, input: RuleInput, origin = "manual"): Promise<RuleRow> {
   assertCan(ctx.actor, "rules.edit");
   const data = ruleInputSchema.parse(input);
   const id = randomUUID();
-  ctx.db
+  await ctx.db
     .insert(rules)
-    .values({ id, workspaceId: ctx.workspaceId, ...data, origin })
-    .run();
-  logHistory(ctx, {
+    .values({ id, workspaceId: ctx.workspaceId, ...data, origin });
+  await logHistory(ctx, {
     entityType: "rule",
     entityId: id,
     event: "created",
@@ -43,20 +42,19 @@ export function createRule(ctx: Ctx, input: RuleInput, origin = "manual"): RuleR
     reason: `Rule ${data.key} created`,
     detail: { rule: data },
   });
-  return getRule(ctx, id)!;
+  return (await getRule(ctx, id))!;
 }
 
-export function updateRule(ctx: Ctx, id: string, input: RuleInput, reason: string): RuleRow {
+export async function updateRule(ctx: Ctx, id: string, input: RuleInput, reason: string): Promise<RuleRow> {
   assertCan(ctx.actor, "rules.edit");
-  const before = getRule(ctx, id);
+  const before = await getRule(ctx, id);
   if (!before) throw new Error("Rule not found");
   const data = ruleInputSchema.parse(input);
-  ctx.db
+  await ctx.db
     .update(rules)
     .set({ ...data, updatedAt: new Date().toISOString() })
-    .where(and(eq(rules.workspaceId, ctx.workspaceId), eq(rules.id, id)))
-    .run();
-  logHistory(ctx, {
+    .where(and(eq(rules.workspaceId, ctx.workspaceId), eq(rules.id, id)));
+  await logHistory(ctx, {
     entityType: "rule",
     entityId: id,
     event: "updated",
@@ -68,14 +66,14 @@ export function updateRule(ctx: Ctx, id: string, input: RuleInput, reason: strin
       after: data,
     },
   });
-  return getRule(ctx, id)!;
+  return (await getRule(ctx, id))!;
 }
 
 /** Rules are never deleted — only disabled — so past verdicts stay explainable. */
-export function setRuleEnabled(ctx: Ctx, id: string, enabled: boolean, reason: string) {
-  const r = getRule(ctx, id);
+export async function setRuleEnabled(ctx: Ctx, id: string, enabled: boolean, reason: string) {
+  const r = await getRule(ctx, id);
   if (!r) throw new Error("Rule not found");
-  return updateRule(
+  return await updateRule(
     ctx,
     id,
     {
@@ -97,34 +95,33 @@ export function setRuleEnabled(ctx: Ctx, id: string, enabled: boolean, reason: s
 
 export const IDENTITY_TERMS_KEY = "redaction.identityTerms";
 
-export function getSetting<T>(ctx: Ctx, key: string, fallback: T): T {
-  const row = ctx.db
+export async function getSetting<T>(ctx: Ctx, key: string, fallback: T): Promise<T> {
+  const [row] = await ctx.db
     .select()
     .from(settings)
     .where(and(eq(settings.workspaceId, ctx.workspaceId), eq(settings.key, key)))
-    .get();
+    .limit(1);
   return row ? (row.value as T) : fallback;
 }
 
-export function setSetting(ctx: Ctx, key: string, value: unknown, reason = "") {
+export async function setSetting(ctx: Ctx, key: string, value: unknown, reason = "") {
   assertCan(ctx.actor, "settings.edit");
-  const existing = ctx.db
+  const [existing] = await ctx.db
     .select()
     .from(settings)
     .where(and(eq(settings.workspaceId, ctx.workspaceId), eq(settings.key, key)))
-    .get();
+    .limit(1);
   if (existing) {
-    ctx.db
+    await ctx.db
       .update(settings)
       .set({ value, updatedAt: new Date().toISOString() })
-      .where(and(eq(settings.workspaceId, ctx.workspaceId), eq(settings.key, key)))
-      .run();
+      .where(and(eq(settings.workspaceId, ctx.workspaceId), eq(settings.key, key)));
   } else {
-    ctx.db.insert(settings).values({ workspaceId: ctx.workspaceId, key, value }).run();
+    await ctx.db.insert(settings).values({ workspaceId: ctx.workspaceId, key, value });
   }
   // Identity terms are themselves sensitive: log that they changed, not their values.
   const sensitive = key === IDENTITY_TERMS_KEY;
-  logHistory(ctx, {
+  await logHistory(ctx, {
     entityType: "setting",
     entityId: key,
     event: existing ? "updated" : "created",
@@ -133,8 +130,8 @@ export function setSetting(ctx: Ctx, key: string, value: unknown, reason = "") {
   });
 }
 
-export function getIdentityTerms(ctx: Ctx): string[] {
-  const v = getSetting<unknown>(ctx, IDENTITY_TERMS_KEY, []);
+export async function getIdentityTerms(ctx: Ctx): Promise<string[]> {
+  const v = await getSetting<unknown>(ctx, IDENTITY_TERMS_KEY, []);
   return Array.isArray(v) ? v.map(String).filter(Boolean) : [];
 }
 
@@ -209,7 +206,7 @@ export const DEFAULT_RULES: RuleInput[] = [
   },
 ];
 
-export function seedDefaultRules(ctx: Ctx) {
-  if (listRules(ctx).length > 0) return;
-  for (const r of DEFAULT_RULES) createRule(ctx, r, "seed");
+export async function seedDefaultRules(ctx: Ctx) {
+  if ((await listRules(ctx)).length > 0) return;
+  for (const r of DEFAULT_RULES) await createRule(ctx, r, "seed");
 }

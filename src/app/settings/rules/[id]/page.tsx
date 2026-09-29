@@ -12,10 +12,10 @@ export const dynamic = "force-dynamic";
 export default async function RulePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
   const { id } = await params;
   const sp = await searchParams;
-  const ctx = getCtx();
-  const rule = getRule(ctx, id);
+  const ctx = (await getCtx());
+  const rule = await getRule(ctx, id);
   if (!rule) notFound();
-  const hist = listHistory(ctx, { entityType: "rule", entityId: id });
+  const hist = await listHistory(ctx, { entityType: "rule", entityId: id });
   return (
     <>
       <Flash sp={sp} />

@@ -20,7 +20,7 @@ export default async function RecordsPage({ searchParams }: { searchParams: Sear
     sort: (SORT_KEYS.includes(one(sp.sort) as SortKey) ? one(sp.sort) : "updated") as SortKey,
     dir: (one(sp.dir) === "asc" ? "asc" : one(sp.dir) === "desc" ? "desc" : undefined) as "asc" | "desc" | undefined,
   };
-  const rows = listRecords(getCtx(), { ...f, limit: LIMIT + 1 });
+  const rows = await listRecords((await getCtx()), { ...f, limit: LIMIT + 1 });
   const shown = rows.slice(0, LIMIT);
 
   const qs = (patch: Record<string, string | undefined>) => {

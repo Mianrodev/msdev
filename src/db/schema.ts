@@ -1,24 +1,26 @@
 /**
- * Storage schema (SQLite via Drizzle). Every table carries `workspace_id` so
+ * Storage schema (Postgres via Drizzle). Every table carries `workspace_id` so
  * multi-tenant support is a matter of resolving the workspace from an
- * authenticated user, not a data-layer rewrite. To move to Postgres, port this
- * file to `drizzle-orm/pg-core` (same column names) and swap the client in
- * client.ts; the service layer only uses Drizzle's query builder.
+ * authenticated user, not a data-layer rewrite.
+ *
+ * Runs on any Postgres (Neon, Supabase, …) in production and on PGlite
+ * (embedded Postgres, no install) for local development and tests.
  *
  * Deletion is blocked at the database level by triggers (see the
  * `append_only` migration): records, target accounts and rules can only be
  * archived/disabled, and history can only be appended to.
  */
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { boolean, index, integer, jsonb, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
 
-const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`;
+/** ISO-8601 UTC timestamp text, matching what the app writes (new Date().toISOString()). */
+const now = sql`(to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))`;
 const timestamps = {
   createdAt: text("created_at").notNull().default(now),
   updatedAt: text("updated_at").notNull().default(now),
 };
 
-export const workspaces = sqliteTable("workspaces", {
+export const workspaces = pgTable("workspaces", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   ...timestamps,
@@ -34,7 +36,7 @@ const workspaceId = () =>
  * "Held lead" and "Archived lead" are views over stage + status, so an item
  * moving between them is a status change (logged to History), never a copy.
  */
-export const records = sqliteTable(
+export const records = pgTable(
   "records",
   {
     id: text("id").primaryKey(),
@@ -105,9 +107,9 @@ export const records = sqliteTable(
     notes: text("notes"),
 
     /** Criterion values the rules evaluate, e.g. {"value": 85000, "location": "UNKNOWN"}. */
-    attributes: text("attributes", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    attributes: jsonb("attributes").$type<Record<string, unknown>>().notNull().default({}),
     /** Imported columns with no first-class field — kept verbatim so nothing is lost. */
-    extra: text("extra", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    extra: jsonb("extra").$type<Record<string, unknown>>().notNull().default({}),
     origin: text("origin").notNull().default("manual"),
     lastReconciledAt: text("last_reconciled_at"),
     ...timestamps,
@@ -119,7 +121,7 @@ export const records = sqliteTable(
 );
 
 /** Accounts worth tracking for outreach even without a specific open opportunity. */
-export const targetAccounts = sqliteTable(
+export const targetAccounts = pgTable(
   "target_accounts",
   {
     id: text("id").primaryKey(),
@@ -146,8 +148,8 @@ export const targetAccounts = sqliteTable(
       .default("tracking"),
     archiveReason: text("archive_reason"),
     notes: text("notes"),
-    attributes: text("attributes", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
-    extra: text("extra", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    attributes: jsonb("attributes").$type<Record<string, unknown>>().notNull().default({}),
+    extra: jsonb("extra").$type<Record<string, unknown>>().notNull().default({}),
     origin: text("origin").notNull().default("manual"),
     ...timestamps,
   },
@@ -155,7 +157,7 @@ export const targetAccounts = sqliteTable(
 );
 
 /** Stage criteria and process rules — replaces the workbook's hidden CONFIG sheet. */
-export const rules = sqliteTable(
+export const rules = pgTable(
   "rules",
   {
     id: text("id").primaryKey(),
@@ -170,12 +172,12 @@ export const rules = sqliteTable(
     operator: text("operator", {
       enum: ["gte", "lte", "includes_any", "excludes_all", "starts_with_any", "not_starts_with_any", "equals", "note"],
     }).notNull(),
-    value: text("value", { mode: "json" }).$type<unknown>(),
+    value: jsonb("value").$type<unknown>(),
     /** What a violation does: "reject" archives; "hold" parks the record in Hold. */
     effect: text("effect", { enum: ["reject", "hold"] })
       .notNull()
       .default("reject"),
-    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    enabled: boolean("enabled").notNull().default(true),
     origin: text("origin").notNull().default("manual"),
     ...timestamps,
   },
@@ -183,22 +185,22 @@ export const rules = sqliteTable(
 );
 
 /** Workspace-level settings (e.g. identity terms for redaction). */
-export const settings = sqliteTable(
+export const settings = pgTable(
   "settings",
   {
     workspaceId: workspaceId(),
     key: text("key").notNull(),
-    value: text("value", { mode: "json" }).$type<unknown>(),
+    value: jsonb("value").$type<unknown>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("settings_ws_key").on(t.workspaceId, t.key)],
 );
 
 /** Append-only audit log. UPDATE and DELETE are blocked by triggers. */
-export const history = sqliteTable(
+export const history = pgTable(
   "history",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
     workspaceId: workspaceId(),
     entityType: text("entity_type").notNull(),
     entityId: text("entity_id"),
@@ -207,7 +209,7 @@ export const history = sqliteTable(
     newStatus: text("new_status"),
     reason: text("reason"),
     actor: text("actor").notNull(),
-    detail: text("detail", { mode: "json" }).$type<Record<string, unknown>>(),
+    detail: jsonb("detail").$type<Record<string, unknown>>(),
     /** Business date of the change (may be historical for imported entries). */
     occurredAt: text("occurred_at").notNull().default(now),
     createdAt: text("created_at").notNull().default(now),
@@ -216,36 +218,36 @@ export const history = sqliteTable(
 );
 
 /** One row per "Run update" — the weekly pipeline run — with its summary. */
-export const pipelineRuns = sqliteTable("pipeline_runs", {
+export const pipelineRuns = pgTable("pipeline_runs", {
   id: text("id").primaryKey(),
   workspaceId: workspaceId(),
   actor: text("actor").notNull(),
-  summary: text("summary", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  summary: jsonb("summary").$type<Record<string, unknown>>().notNull(),
   startedAt: text("started_at").notNull(),
   finishedAt: text("finished_at").notNull(),
 });
 
-export const importBatches = sqliteTable("import_batches", {
+export const importBatches = pgTable("import_batches", {
   id: text("id").primaryKey(),
   workspaceId: workspaceId(),
   fileName: text("file_name").notNull(),
   /** Per-sheet source row counts and outcomes, for the no-record-loss check. */
-  summary: text("summary", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  summary: jsonb("summary").$type<Record<string, unknown>>().notNull(),
   createdAt: text("created_at").notNull().default(now),
 });
 
 /** Every source row, verbatim, linked to what it became. Guarantees nothing is lost in migration. */
-export const importRows = sqliteTable(
+export const importRows = pgTable(
   "import_rows",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
     workspaceId: workspaceId(),
     batchId: text("batch_id")
       .notNull()
       .references(() => importBatches.id),
     sheet: text("sheet").notNull(),
     rowNumber: integer("row_number").notNull(),
-    raw: text("raw", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    raw: jsonb("raw").$type<Record<string, unknown>>().notNull(),
     entityType: text("entity_type").notNull(),
     entityId: text("entity_id"),
     outcome: text("outcome").notNull(),

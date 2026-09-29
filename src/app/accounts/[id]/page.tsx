@@ -14,15 +14,15 @@ export const dynamic = "force-dynamic";
 export default async function AccountPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
   const { id } = await params;
   const sp = await searchParams;
-  const ctx = getCtx();
+  const ctx = (await getCtx());
   let a;
   try {
-    a = getAccount(ctx, id);
+    a = await getAccount(ctx, id);
   } catch (e) {
     if (e instanceof NotFoundError) notFound();
     throw e;
   }
-  const hist = listHistory(ctx, { entityType: "target_account", entityId: id });
+  const hist = await listHistory(ctx, { entityType: "target_account", entityId: id });
   const attrs = Object.entries(a.attributes).filter(([k]) => k !== "section");
   return (
     <>

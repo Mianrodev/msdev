@@ -7,7 +7,9 @@
  * its source data rows (or CONFIG's own migration-validation counts), nothing
  * is written.
  */
-import { DEFAULT_DB_PATH, openDb } from "../src/db/client";
+import fs from "node:fs";
+import path from "node:path";
+import { databaseUrl, localDataDir, migrateDb } from "../src/db/client";
 import { DEFAULT_WORKSPACE_ID, ensureWorkspace, type Ctx } from "../src/services/context";
 import { seedDefaultRules } from "../src/services/rules";
 import { syncIdentityTerms } from "./lib/identity";
@@ -41,15 +43,16 @@ async function main() {
     console.error('Usage: npm run import -- "path/to/workbook.xlsx" [--force]');
     process.exit(2);
   }
-  const db = openDb();
-  ensureWorkspace(db);
+  const db = await migrateDb();
+  await ensureWorkspace(db);
   const ctx: Ctx = { db, workspaceId: DEFAULT_WORKSPACE_ID, actor: { kind: "human", id: "owner" } };
-  seedDefaultRules(ctx);
-  syncIdentityTerms(ctx);
+  await seedDefaultRules(ctx);
+  await syncIdentityTerms(ctx);
   try {
-    const report = await importWorkbook(ctx, file, { force: args.includes("--force") });
-    console.log(`Imported ${report.file} into ${DEFAULT_DB_PATH} (batch ${report.batchId.slice(0, 8)})`);
+    const report = await importWorkbook(ctx, { name: path.basename(file), data: fs.readFileSync(file) }, { force: args.includes("--force") });
+    console.log(`Imported ${report.file} into ${databaseUrl() ? "Postgres (DATABASE_URL)" : localDataDir()} (batch ${report.batchId.slice(0, 8)})`);
     printReport(report);
+    process.exit(0);
   } catch (e) {
     if (e instanceof ImportCountMismatch) {
       console.error(e.message);
@@ -64,4 +67,7 @@ async function main() {
   }
 }
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

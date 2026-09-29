@@ -11,7 +11,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Sea
   const status = one(sp.status) || undefined;
   const list = one(sp.list) || undefined;
   const q = one(sp.q) || undefined;
-  const rows = listAccounts(getCtx(), { status, q }).filter((a) => !list || a.attributes.list === list);
+  const rows = (await listAccounts(await getCtx(), { status, q })).filter((a) => !list || a.attributes.list === list);
   return (
     <>
       <Flash sp={sp} />

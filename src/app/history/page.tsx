@@ -11,7 +11,7 @@ export default async function HistoryPage({ searchParams }: { searchParams: Sear
   const sp = await searchParams;
   const entityType = one(sp.type) || undefined;
   const event = one(sp.event) || undefined;
-  const rows = listHistory(getCtx(), { entityType, event, limit: 500 });
+  const rows = await listHistory((await getCtx()), { entityType, event, limit: 500 });
   const link = (type: string, id: string | null) =>
     !id ? null : type === "record" ? `/records/${id}` : type === "target_account" ? `/accounts/${id}` : type === "rule" ? `/settings/rules/${id}` : null;
   return (

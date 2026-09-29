@@ -29,17 +29,17 @@ export const dynamic = "force-dynamic";
 export default async function RecordPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
   const { id } = await params;
   const sp = await searchParams;
-  const ctx = getCtx();
+  const ctx = (await getCtx());
   let r;
   try {
-    r = getRecord(ctx, id);
+    r = await getRecord(ctx, id);
   } catch (e) {
     if (e instanceof NotFoundError) notFound();
     throw e;
   }
-  const pending = pendingDecision(ctx, r);
-  const overall = evaluateRecord(ctx, r, "all");
-  const hist = listHistory(ctx, { entityType: "record", entityId: id, limit: 200 });
+  const pending = await pendingDecision(ctx, r);
+  const overall = await evaluateRecord(ctx, r, "all");
+  const hist = await listHistory(ctx, { entityType: "record", entityId: id, limit: 200 });
   const bind = <T,>(fn: (id: string, f: FormData) => Promise<T>) => fn.bind(null, id);
 
   return (

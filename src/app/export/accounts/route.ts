@@ -4,9 +4,9 @@ import { getCtx } from "@/services/request";
 
 export const dynamic = "force-dynamic";
 
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get("mode") === "internal" ? "internal" : "shared";
-  const csv = toCsv(exportAccounts(getCtx(), mode));
+  const csv = toCsv(await exportAccounts((await getCtx()), mode));
   return new Response(csv, {
     headers: {
       "content-type": "text/csv; charset=utf-8",

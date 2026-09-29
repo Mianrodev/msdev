@@ -1,6 +1,6 @@
 # Prospect CRM
 
-A local, single-user lead/prospect CRM that replaces the Excel prospect-tracking
+A single-user lead/prospect CRM that replaces the Excel prospect-tracking
 workbook. It runs a four-stage pipeline — **Discovery → Screen → Triage → Verify**
 — over leads, with the criteria stored as editable data, deduplication,
 reconciliation of existing prospects, and an append-only audit log.
@@ -10,22 +10,45 @@ works for sales leads, partnerships or recruiting pipelines. Every table is
 scoped by `workspace_id`, so multi-tenant accounts can be added later without
 rewriting the data layer.
 
+It runs online (Vercel + a free Neon Postgres database) or on a computer.
+
 **This tool only researches and prepares — it never acts.** It never submits
 anything or contacts anyone. You approve and send outreach yourself; the app
 only records that you did.
 
-## Quick start
+## Put it online (Vercel + free Neon database)
 
-Requires Node.js 20.9+.
+1. In Vercel: **Add New… → Project**, pick this GitHub repository, then **Deploy**.
+   The site will say a database needs connecting. That's expected.
+2. In the project: **Storage → Create Database → Neon (Postgres)**, then connect it to
+   the project. This sets `DATABASE_URL` automatically.
+3. In the project: **Settings → Environment Variables**, add `APP_PASSWORD` with the
+   password you want to sign in with.
+4. **Deployments → ⋯ → Redeploy.** Every deploy sets up and upgrades the database
+   automatically, before the new version goes live.
+5. Open the site, sign in, then go to **Import** and upload the tracker workbook.
+6. In **Rules & settings → Redaction**, add the identity terms that must never appear in
+   shared exports.
+
+The app refuses all access if `APP_PASSWORD` isn't set, and every page, form and export
+requires a signed-in session.
+
+## Run it on a computer (optional)
+
+Requires Node.js 20.9+. No database install: an embedded Postgres keeps data in
+`data/pglite` (gitignored).
 
 ```bash
 npm install
-npm run dev          # creates/migrates data/crm.db, then serves http://localhost:3000
+npm run dev          # sets up the database, then serves http://localhost:3000
 ```
 
-No accounts, API keys or paid services are needed.
+Without `APP_PASSWORD`, local development doesn't ask for a password. Set
+`DATABASE_URL` to use a real Postgres instead.
 
-### Import the workbook (one-time)
+### Import the workbook
+
+Use the **Import** page in the app, or from a terminal:
 
 ```bash
 npm run import -- "path/to/Local Prospect Weekly Tracker.xlsx"
@@ -37,7 +60,8 @@ npm run import -- "path/to/Local Prospect Weekly Tracker.xlsx"
   written.
 - Every source row is kept verbatim in `import_rows` and linked to the record it
   became.
-- Importing the same file twice is refused. Pass `--force` to import it again anyway.
+- Importing the same file twice is refused, unless you choose to import it again
+  anyway.
 - Keep the workbook **out of the repo**. `*.xlsx` is gitignored, except for the
   placeholder test fixture.
 
@@ -56,10 +80,11 @@ current state (RAW → PRIORITY → HOLD → ARCHIVE).
 
 ### Redaction terms (keep private)
 
-Copy `config/identity.example.json` to `data/identity.local.json` (gitignored)
-and fill in the owner's name, personal email/phone, profile URL, home city and
-current employer. They are loaded on every `npm run dev` / import, and are
-redacted from **shared** exports. You can also edit them in *Rules & settings*.
+Enter the owner's name, personal email/phone, profile URL, home city and
+current employer in *Rules & settings → Redaction*. They are redacted from
+**shared** exports. When running on a computer, you can instead copy
+`config/identity.example.json` to `data/identity.local.json` (gitignored); it is
+loaded on every start.
 
 ## Using it
 
@@ -96,7 +121,7 @@ redacted from **shared** exports. You can also edit them in *Rules & settings*.
 | Unverifiable sources → Hold | Verify-stage promotion requires `source = verified`; reconciliation holds unverified prospects (`core/pipeline.ts`). |
 | Dedup on (account, opportunity, URL) | Unique index plus in-place update, logged as `dedup_merge`. URLs and company names are normalised (`core/dedup.ts`). |
 | Reconciliation every run | `services/reconcile.ts`, called first by Run update. |
-| Nothing hard-deleted; every change logged | SQLite triggers block `DELETE` on records, accounts and rules, and any `UPDATE`/`DELETE` on history (`drizzle/0001_append_only.sql`). |
+| Nothing hard-deleted; every change logged | Postgres triggers block `DELETE`/`TRUNCATE` on records, accounts and rules, and any `UPDATE`/`DELETE`/`TRUNCATE` on history (`drizzle/0001_append_only.sql`). |
 | Research only, never acts | Permission layer: no send/submit capability exists; human-only outreach states need a human actor plus explicit confirmation (`core/permissions.ts`). ESLint forbids `fetch`/`http`/mail libraries in `src/`. |
 | No identity leakage | Every exported field is classified (unclassified = restricted), and shared exports are scrubbed (`core/redaction.ts`). Contacts live only in labelled contact fields, never in the dedup key. |
 
@@ -120,21 +145,21 @@ It stays a note for human judgement at Verify.
 
 ```
 src/core/       pure domain logic (no DB): rules, pipeline, dedup, permissions, redaction
-src/db/         Drizzle schema + SQLite client
+src/db/         Drizzle schema + Postgres client (Neon/any Postgres online, embedded PGlite locally)
+src/lib/        password login (signed session cookie)
+src/proxy.ts    requires sign-in for every request
 src/services/   workspace-scoped persistence; every change writes History
 src/app/        Next.js UI (server components + server actions) and CSV export routes
-scripts/        migrate, one-time workbook import, fixture generator
+scripts/        migrate, workbook import (also used by the Import page), fixture generator
 drizzle/        SQL migrations (incl. append-only triggers)
 tests/          vitest: core rules, services, import (placeholder fixture only)
 ```
 
 Checks: `npm test`, `npm run typecheck`, `npm run lint`.
 
-### Moving to Postgres / multi-tenant later
+### Multi-tenant later
 
-- **Postgres**: port `src/db/schema.ts` to `drizzle-orm/pg-core` (same column
-  names), swap the client in `src/db/client.ts`, and regenerate migrations. The
-  services only use Drizzle's query builder. Recreate the append-only triggers
-  as Postgres triggers.
-- **Multi-tenant**: `src/services/request.ts#getCtx` is the single place that
-  decides the workspace and actor. Resolve them from an authenticated session.
+`src/services/request.ts#getCtx` is the single place that decides the workspace
+and actor. Replace the single-owner password (`src/lib/session.ts`) with
+per-user accounts, and resolve each user's workspace there. Every query is
+already scoped by `workspace_id`.

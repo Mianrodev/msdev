@@ -13,6 +13,15 @@ const config = [
   ...nextTs,
   { ignores: [".next/**", "node_modules/**", "drizzle/**", "data/**", "next-env.d.ts"] },
   {
+    files: ["src/**/*.{ts,tsx}", "scripts/**/*.ts", "tests/**/*.ts"],
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": ["error", { checksVoidReturn: false }],
+      "@typescript-eslint/await-thenable": "error",
+    },
+  },
+  {
     files: ["src/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-globals": ["error", { name: "fetch", message: OUTBOUND }, { name: "XMLHttpRequest", message: OUTBOUND }, { name: "WebSocket", message: OUTBOUND }],

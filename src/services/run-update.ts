@@ -17,7 +17,7 @@
  * Designed as a plain function so a scheduler could call it later; v1 only
  * exposes it as a button.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { pipelineRuns, records } from "@/db/schema";
 import { suggestVerdict, verdictEffect } from "@/core/pipeline";
@@ -27,6 +27,7 @@ import { asSystem, type Ctx } from "./context";
 import { logHistory } from "./history";
 import { decideStage, evaluateRecord } from "./records";
 import { reconcileExisting, type ReconcileReport } from "./reconcile";
+import { activeRules } from "./rules";
 
 export interface StageCounts {
   in: number;
@@ -52,22 +53,24 @@ const STAGE_FROM: Record<DecisionStage, "discovery" | "screen" | "triage"> = {
   verify: "triage",
 };
 
-export function runUpdate(ctx: Ctx): RunSummary {
+export async function runUpdate(ctx: Ctx): Promise<RunSummary> {
   const startedAt = new Date().toISOString();
   const runId = randomUUID();
 
-  return ctx.db.transaction((tx) => {
+  return ctx.db.transaction(async (tx) => {
+    // Rules are loaded once for the whole run: every stage sees the same criteria.
     const c: Ctx = { ...ctx, db: tx as unknown as Ctx["db"] };
-    const sys = asSystem(c, `run-update:${runId.slice(0, 8)}`);
+    c.rules = await activeRules(c);
+    const sys: Ctx = { ...asSystem(c, `run-update:${runId.slice(0, 8)}`), rules: c.rules };
     const scoped = (stage: "discovery" | "screen" | "triage") =>
       sys.db
         .select()
         .from(records)
         .where(and(eq(records.workspaceId, c.workspaceId), eq(records.status, "active"), eq(records.stage, stage)))
-        .all();
+        .orderBy(asc(records.createdAt), asc(records.id));
 
-    const intake = scoped("discovery").length;
-    const rec = reconcileExisting(c);
+    const intake = (await scoped("discovery")).length;
+    const rec = await reconcileExisting(c);
     const changes: RunSummary["changes"] = rec.changes.map(({ id, account, opportunity, from, to }) => ({
       id,
       account,
@@ -79,15 +82,15 @@ export function runUpdate(ctx: Ctx): RunSummary {
     const stages = {} as Record<DecisionStage, StageCounts>;
     for (const stage of ["screen", "triage", "verify"] as const) {
       const counts: StageCounts = { in: 0, advanced: 0, held: 0, archived: 0 };
-      for (const r of scoped(STAGE_FROM[stage])) {
+      for (const r of await scoped(STAGE_FROM[stage])) {
         counts.in++;
-        const evaluation = evaluateRecord(sys, r, stage);
+        const evaluation = await evaluateRecord(sys, r, stage);
         const verdict = suggestVerdict(stage, evaluation, r.sourceVerification)!;
         const why =
           stage === "verify" && verdict === "hold_needs_info" && r.sourceVerification !== "verified" && !evaluation.holds.length
             ? `Source is ${r.sourceVerification} — needs live verification`
             : summarize(evaluation);
-        const after = decideStage(sys, r.id, {
+        const after = await decideStage(sys, r.id, {
           stage,
           verdict,
           reason: `Run update: ${VERDICT_LABELS[verdict]} — ${why}`,
@@ -104,11 +107,10 @@ export function runUpdate(ctx: Ctx): RunSummary {
     }
 
     const tiers: Record<string, number> = {};
-    for (const r of sys.db
+    for (const r of await sys.db
       .select({ tier: records.fitTier })
       .from(records)
-      .where(and(eq(records.workspaceId, c.workspaceId), eq(records.status, "active"), eq(records.stage, "verify")))
-      .all()) {
+      .where(and(eq(records.workspaceId, c.workspaceId), eq(records.status, "active"), eq(records.stage, "verify")))) {
       const k = (r.tier as FitTier | null) ?? "untiered";
       tiers[k] = (tiers[k] ?? 0) + 1;
     }
@@ -125,7 +127,7 @@ export function runUpdate(ctx: Ctx): RunSummary {
       changes,
     };
 
-    sys.db
+    await sys.db
       .insert(pipelineRuns)
       .values({
         id: runId,
@@ -134,9 +136,8 @@ export function runUpdate(ctx: Ctx): RunSummary {
         summary: summary as unknown as Record<string, unknown>,
         startedAt,
         finishedAt: new Date().toISOString(),
-      })
-      .run();
-    logHistory(sys, {
+      });
+    await logHistory(sys, {
       entityType: "pipeline_run",
       entityId: runId,
       event: "run_update",
@@ -167,12 +168,11 @@ export function formatSummary(s: RunSummary): string {
   ].join(". ");
 }
 
-export function listRuns(ctx: Ctx, limit = 20) {
+export async function listRuns(ctx: Ctx, limit = 20) {
   return ctx.db
     .select()
     .from(pipelineRuns)
     .where(eq(pipelineRuns.workspaceId, ctx.workspaceId))
     .orderBy(desc(pipelineRuns.startedAt))
-    .limit(limit)
-    .all();
+    .limit(limit);
 }

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { logoutAction } from "./login/actions";
+import { authConfigured } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Prospect CRM",
@@ -23,6 +25,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/accounts">Target accounts</Link>
             <Link href="/history">History</Link>
             <Link href="/settings">Rules &amp; settings</Link>
+            <Link href="/import">Import</Link>
+            {authConfigured() && (
+              <form action={logoutAction} style={{ marginLeft: "auto" }}>
+                <button type="submit" className="small">
+                  Sign out
+                </button>
+              </form>
+            )}
           </nav>
           <main>{children}</main>
         </div>

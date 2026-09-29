@@ -19,8 +19,6 @@
  */
 import { and, eq } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { importBatches, importRows, records, type RecordRow } from "../../src/db/schema";
 import { dedupKey } from "../../src/core/dedup";
 import { assertCan } from "../../src/core/permissions";
@@ -423,36 +421,44 @@ export interface ImportReport {
 
 export class AlreadyImportedError extends Error {}
 
-export async function importWorkbook(ctx: Ctx, file: string, opts: { force?: boolean } = {}): Promise<ImportReport> {
-  const buf = fs.readFileSync(file);
+export interface WorkbookSource {
+  /** File name as uploaded / on disk (for the report only). */
+  name: string;
+  data: Buffer | ArrayBuffer;
+}
+
+export async function importWorkbook(ctx: Ctx, src: WorkbookSource, opts: { force?: boolean } = {}): Promise<ImportReport> {
+  const buf = Buffer.isBuffer(src.data) ? src.data : Buffer.from(src.data);
   const sha256 = createHash("sha256").update(buf).digest("hex");
-  const previous = getSetting<string[]>(ctx, "import.hashes", []);
+  const previous = await getSetting<string[]>(ctx, "import.hashes", []);
   if (previous.includes(sha256) && !opts.force) {
     throw new AlreadyImportedError("This exact workbook was already imported (use --force to import again).");
   }
-  const sheets = await readWorkbook(file, HEADERS, URL_COLUMNS, new Set(["CONFIG"]));
+  const sheets = await readWorkbook(buf, HEADERS, URL_COLUMNS, new Set(["CONFIG"]));
   const batchId = randomUUID();
   const ictx: Ctx = { ...ctx, actor: { kind: "import", batchId } };
   assertCan(ictx.actor, "import.run");
 
   const report: ImportReport = {
     batchId,
-    file: path.basename(file),
+    file: src.name.split(/[\\/]/).pop() ?? src.name,
     sheets: [],
     hyperlinks: sheets.reduce((n, s) => n + s.hyperlinks, 0),
     statusConflicts: [],
     ok: true,
   };
 
-  ctx.db.transaction((tx) => {
+  await ctx.db.transaction(async (tx) => {
     const c: Ctx = { ...ictx, db: tx as unknown as Ctx["db"] };
-    c.db.insert(importBatches).values({ id: batchId, workspaceId: c.workspaceId, fileName: report.file, summary: {} }).run();
+    await c.db.insert(importBatches).values({ id: batchId, workspaceId: c.workspaceId, fileName: report.file, summary: {} });
 
-    const rowLog = (sheet: string, r: SheetRow, entityType: string, entityId: string | null, outcome: string) =>
-      c.db
-        .insert(importRows)
-        .values({ workspaceId: c.workspaceId, batchId, sheet, rowNumber: r.rowNumber, raw: { section: r.section, ...r.values }, entityType, entityId, outcome })
-        .run();
+    // Source rows are buffered and written in bulk at the end (same transaction).
+    const pendingRows: (typeof importRows.$inferInsert)[] = [];
+    const rowLog: RowLog = (sheet, r, entityType, entityId, outcome) => {
+      pendingRows.push({ workspaceId: c.workspaceId, batchId, sheet, rowNumber: r.rowNumber, raw: { section: r.section, ...r.values }, entityType, entityId, outcome });
+    };
+    // CONFIG reference rows are grouped per section and saved once each.
+    const configSettings = new Map<string, Record<string, string>>();
 
     const statusSetBy = new Map<string, string[]>();
     const bySheet = new Map(sheets.map((s) => [s.name, s]));
@@ -483,13 +489,13 @@ export async function importWorkbook(ctx: Ctx, file: string, opts: { force?: boo
         rep.sections[r.section || "(main)"] = (rep.sections[r.section || "(main)"] ?? 0) + 1;
 
         if ((RECORD_SHEETS as readonly string[]).includes(name)) {
-          importRecordRow(c, name, r, statusSetBy, rowLog, bump);
+          await importRecordRow(c, name, r, statusSetBy, rowLog, bump);
         } else if (name === "TARGET ACCOUNTS") {
-          importAccountRow(c, r, rowLog, bump);
+          await importAccountRow(c, r, rowLog, bump);
         } else if (name === "HISTORY") {
-          importHistoryRow(c, r, rowLog, bump);
+          await importHistoryRow(c, r, rowLog, bump);
         } else if (name === "CONFIG") {
-          importConfigRow(c, r, sheet, rowLog, bump);
+          await importConfigRow(c, r, sheet, rowLog, bump, configSettings);
         } else {
           rowLog(name, r, "unmapped", null, "stored");
           bump("stored (no mapping)");
@@ -498,17 +504,25 @@ export async function importWorkbook(ctx: Ctx, file: string, opts: { force?: boo
       report.sheets.push(rep);
     }
 
+    for (const [key, value] of configSettings) {
+      const current = await getSetting<Record<string, string>>(c, key, {});
+      await setSetting(c, key, { ...current, ...value }, `Imported from CONFIG`);
+    }
+    for (let i = 0; i < pendingRows.length; i += 500) {
+      await c.db.insert(importRows).values(pendingRows.slice(i, i + 500));
+    }
+
     // Derived, evaluable criteria (upsert by key so re-imports don't duplicate).
-    const existing = new Map(listRules(c).map((r) => [r.key, r]));
+    const existing = new Map((await listRules(c)).map((r) => [r.key, r]));
     const hctx: Ctx = { ...c, actor: { kind: "human", id: "owner" } }; // rules.edit on the owner's behalf during setup
     for (const rule of DERIVED_CRITERIA) {
       const e = existing.get(rule.key);
-      if (e) updateRule(hctx, e.id, { ...rule, enabled: e.enabled }, "Re-derived from CONFIG on import");
-      else createRule(hctx, rule, "derived:CONFIG");
+      if (e) await updateRule(hctx, e.id, { ...rule, enabled: e.enabled }, "Re-derived from CONFIG on import");
+      else await createRule(hctx, rule, "derived:CONFIG");
     }
 
     // Expected counts, from CONFIG's own "MIGRATION VALIDATION" block.
-    const validation = getSetting<Record<string, string>>(c, "config.migration_validation", {});
+    const validation = await getSetting<Record<string, string>>(c, "config.migration_validation", {});
     const after = (k: string) => Number(validation[k] ?? NaN);
     const expected: Record<string, number> = {
       PRIORITY: after("After - PRIORITY"),
@@ -527,13 +541,12 @@ export async function importWorkbook(ctx: Ctx, file: string, opts: { force?: boo
       .filter(([, v]) => new Set(v.map((x) => x.split(":").pop())).size > 1)
       .map(([id, v]) => ({ id, sheets: v }));
 
-    c.db
+    await c.db
       .update(importBatches)
       .set({ summary: { sha256, ...report } as unknown as Record<string, unknown> })
-      .where(eq(importBatches.id, batchId))
-      .run();
-    setSetting(c, "import.hashes", [...previous, sha256], "Record imported workbook fingerprint");
-    logHistory(c, {
+      .where(eq(importBatches.id, batchId));
+    await setSetting(c, "import.hashes", [...previous, sha256], "Record imported workbook fingerprint");
+    await logHistory(c, {
       entityType: "import",
       entityId: batchId,
       event: "workbook_import",
@@ -553,7 +566,7 @@ export class ImportCountMismatch extends Error {
 
 type RowLog = (sheet: string, r: SheetRow, entityType: string, entityId: string | null, outcome: string) => void;
 
-function importRecordRow(
+async function importRecordRow(
   c: Ctx,
   sheet: string,
   r: SheetRow,
@@ -568,12 +581,12 @@ function importRecordRow(
     sourceUrl: plan.input.sourceUrl,
     nextStepUrl: plan.input.nextStepUrl,
   });
-  const before = findByDedupKey(c, key);
+  const before = await findByDedupKey(c, key);
   // Notes accumulate across sheets rather than overwrite.
   if (before?.notes && plan.input.notes && !before.notes.includes(plan.input.notes)) {
     plan.input.notes = `${before.notes}\n\n[${sheet}] ${plan.input.notes}`;
   }
-  const { record, created } = upsertLead(c, plan.input, `import:${sheet}`);
+  const { record, created } = await upsertLead(c, plan.input, `import:${sheet}`);
 
   if (plan.state) {
     const patch: Partial<RecordRow> = {};
@@ -584,14 +597,13 @@ function importRecordRow(
       (patch as Record<string, unknown>)[k] = v;
     }
     if (Object.keys(patch).length) {
-      c.db
+      await c.db
         .update(records)
         .set({ ...patch, updatedAt: new Date().toISOString() })
-        .where(and(eq(records.workspaceId, c.workspaceId), eq(records.id, record.id)))
-        .run();
-      const after = getRecord(c, record.id);
+        .where(and(eq(records.workspaceId, c.workspaceId), eq(records.id, record.id)));
+      const after = await getRecord(c, record.id);
       if (after.stage !== record.stage || after.status !== record.status || created) {
-        logHistory(c, {
+        await logHistory(c, {
           entityType: "record",
           entityId: record.id,
           event: "import.state",
@@ -607,7 +619,7 @@ function importRecordRow(
   bump(created ? "created" : "merged into existing record");
 }
 
-function importAccountRow(c: Ctx, r: SheetRow, rowLog: RowLog, bump: (o: string) => void) {
+async function importAccountRow(c: Ctx, r: SheetRow, rowLog: RowLog, bump: (o: string) => void) {
   const v = r.values;
   const used = new Set<string>();
   const p = (...n: string[]) => pick(v, used, ...n);
@@ -631,18 +643,18 @@ function importAccountRow(c: Ctx, r: SheetRow, rowLog: RowLog, bump: (o: string)
       ...(r.section ? { section: r.section } : {}),
     },
   };
-  const { account, created } = upsertAccount(c, input, "import:TARGET ACCOUNTS");
+  const { account, created } = await upsertAccount(c, input, "import:TARGET ACCOUNTS");
   rowLog("TARGET ACCOUNTS", r, "target_account", account.id, created ? "created" : "merged");
   bump(created ? "created" : "merged into existing account");
 }
 
-function importHistoryRow(c: Ctx, r: SheetRow, rowLog: RowLog, bump: (o: string) => void) {
+async function importHistoryRow(c: Ctx, r: SheetRow, rowLog: RowLog, bump: (o: string) => void) {
   const v = r.values;
   const url = v["Next Step URL"] ?? v["Source URL"];
   const key = dedupKey({ account: v.Account ?? "UNKNOWN", opportunity: v.Opportunity ?? "UNKNOWN", sourceUrl: url });
-  const linked = findByDedupKey(c, key);
+  const linked = await findByDedupKey(c, key);
   const block = /activity log/i.test(r.section) ? "activity_log" : "reconciliation";
-  logHistory(c, {
+  await logHistory(c, {
     entityType: "record",
     entityId: linked?.id ?? null,
     event: `import.history.${block}`,
@@ -656,7 +668,14 @@ function importHistoryRow(c: Ctx, r: SheetRow, rowLog: RowLog, bump: (o: string)
   bump(linked ? "history entry linked to record" : "history entry (no matching record)");
 }
 
-function importConfigRow(c: Ctx, r: SheetRow, sheet: Sheet, rowLog: RowLog, bump: (o: string) => void) {
+async function importConfigRow(
+  c: Ctx,
+  r: SheetRow,
+  sheet: Sheet,
+  rowLog: RowLog,
+  bump: (o: string) => void,
+  configSettings: Map<string, Record<string, string>>,
+) {
   const key = (r.values.key ?? "").trim();
   const value = (r.values.value ?? "").trim();
   // Section header rows (key only) set the section for following rows.
@@ -676,7 +695,7 @@ function importConfigRow(c: Ctx, r: SheetRow, sheet: Sheet, rowLog: RowLog, bump
   const section = sectionOf();
   if (RULE_SECTIONS.some((re) => re.test(section))) {
     const ruleKey = `config.${slug(section)}.${slug(key)}`;
-    const existing = listRules(c).find((x) => x.key === ruleKey);
+    const existing = (await listRules(c)).find((x) => x.key === ruleKey);
     const hctx: Ctx = { ...c, actor: { kind: "human", id: "owner" } };
     const input: RuleInput = {
       key: ruleKey,
@@ -689,15 +708,14 @@ function importConfigRow(c: Ctx, r: SheetRow, sheet: Sheet, rowLog: RowLog, bump
       enabled: true,
     };
     const rule = existing
-      ? updateRule(hctx, existing.id, input, "Re-imported from CONFIG")
-      : createRule(hctx, input, "import:CONFIG");
+      ? await updateRule(hctx, existing.id, input, "Re-imported from CONFIG")
+      : await createRule(hctx, input, "import:CONFIG");
     rowLog("CONFIG", r, "rule", rule.id, existing ? "rule updated" : "rule");
     bump(existing ? "rule updated" : "rule (process note)");
     return;
   }
   const settingKey = `config.${slug(section) || "misc"}`;
-  const current = getSetting<Record<string, string>>(c, settingKey, {});
-  setSetting(c, settingKey, { ...current, [key]: value }, `CONFIG › ${section}`);
+  configSettings.set(settingKey, { ...(configSettings.get(settingKey) ?? {}), [key]: value });
   rowLog("CONFIG", r, "setting", settingKey, "setting");
   bump("setting");
 }

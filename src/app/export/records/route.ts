@@ -5,11 +5,11 @@ import { getCtx } from "@/services/request";
 
 export const dynamic = "force-dynamic";
 
-export function GET(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get("mode") === "internal" ? "internal" : "shared";
   const v = req.nextUrl.searchParams.get("view") ?? "all";
   const view = (v in VIEWS ? v : "all") as View;
-  const csv = toCsv(exportRecords(getCtx(), mode, { view }));
+  const csv = toCsv(await exportRecords((await getCtx()), mode, { view }));
   return new Response(csv, {
     headers: {
       "content-type": "text/csv; charset=utf-8",
