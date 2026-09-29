@@ -115,3 +115,12 @@ export function actorLabel(a: Actor): string {
       return `import:${a.batchId}`;
   }
 }
+
+/** "Effort to apply" ratings. A bare rating like "MEDIUM" in a how-to-proceed column is really this. */
+export const EFFORT_LEVELS = ["Easy", "Medium", "Hard"] as const;
+export function effortFrom(v: string | null | undefined): (typeof EFFORT_LEVELS)[number] | null {
+  const m = (v ?? "").trim().match(/^(easy|low|medium|moderate|hard|high)$/i);
+  if (!m) return null;
+  const w = m[1].toLowerCase();
+  return w === "easy" || w === "low" ? "Easy" : w === "hard" || w === "high" ? "Hard" : "Medium";
+}

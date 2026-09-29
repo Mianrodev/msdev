@@ -7,7 +7,8 @@
 import { databaseUrl, localDataDir, migrateDb } from "../src/db/client";
 import { DEFAULT_WORKSPACE_ID, ensureWorkspace } from "../src/services/context";
 import { and, eq, inArray } from "drizzle-orm";
-import { rules } from "../src/db/schema";
+import { records, rules } from "../src/db/schema";
+import { effortFrom } from "../src/core/types";
 import { logHistory } from "../src/services/history";
 import { DEFAULT_RULES, seedDefaultRules } from "../src/services/rules";
 import { syncIdentityTerms } from "./lib/identity";
@@ -16,6 +17,25 @@ import type { Ctx } from "../src/services/context";
 
 /** Old built-in wording that pointed at code or used jargon — safe to replace. */
 const OLD_WORDING = /Enforced in core\/|From CONFIG ›|Example criterion|^A fact that isn't known|^A source that can't be reached|^The tool never submits|^A record can advance/;
+
+/** Earlier imports put effort ratings ("MEDIUM") into Next action; move them to "Effort to apply". */
+async function moveEffortRatings(ctx: Ctx) {
+  const rows = await ctx.db.select().from(records).where(eq(records.workspaceId, ctx.workspaceId));
+  for (const r of rows) {
+    const effort = effortFrom(r.nextAction);
+    if (!effort || !r.origin.startsWith("import:")) continue;
+    await ctx.db
+      .update(records)
+      .set({ nextAction: null, attributes: { ...r.attributes, effortToApply: effort }, updatedAt: new Date().toISOString() })
+      .where(and(eq(records.workspaceId, ctx.workspaceId), eq(records.id, r.id)));
+    await logHistory(ctx, {
+      entityType: "record",
+      entityId: r.id,
+      event: "updated",
+      reason: `Moved "${r.nextAction}" from How to proceed to Effort to apply`,
+    });
+  }
+}
 
 /** Keep the built-in rules' names and descriptions current, unless the owner has reworded them. */
 async function refreshBuiltInWording(ctx: Ctx) {
@@ -48,6 +68,7 @@ async function main() {
   const ctx = { db, workspaceId: DEFAULT_WORKSPACE_ID, actor: { kind: "human" as const, id: "owner" } };
   await seedDefaultRules(ctx);
   await refreshBuiltInWording(ctx);
+  await moveEffortRatings(ctx);
   const n = await syncIdentityTerms(ctx);
   console.log(`Database ready: ${databaseUrl() ? "Postgres (DATABASE_URL)" : localDataDir()}${n ? ` (${n} redaction terms loaded)` : ""}`);
   process.exit(0);

@@ -23,7 +23,7 @@ import { importBatches, importRows, records, type RecordRow } from "../../src/db
 import { dedupKey } from "../../src/core/dedup";
 import { assertCan } from "../../src/core/permissions";
 import type { RuleInput } from "../../src/core/rules";
-import { STAGES, type FitTier, type SourceVerification } from "../../src/core/types";
+import { effortFrom, STAGES, type FitTier, type SourceVerification } from "../../src/core/types";
 import { upsertAccount } from "../../src/services/accounts";
 import type { Ctx } from "../../src/services/context";
 import { logHistory } from "../../src/services/history";
@@ -272,12 +272,16 @@ export function mapRecordRow(sheet: string, values: Record<string, string>): Rec
         fitRationale: p("Fit Rationale"),
         preparedBrief: p("Prepared Brief"),
         preparedAnswers: p("Prepared Answers"),
-        nextAction: p("How To Proceed"),
         lastVerifiedAt: lastVerified,
         responseNotes: p("Response Notes"),
         notes: p("Notes"),
       };
+      // "How To Proceed" sometimes holds an effort rating (MEDIUM, EASY) rather than instructions.
+      const proceed = p("How To Proceed");
+      const effort = effortFrom(proceed);
+      if (!effort) input.nextAction = proceed;
       input.attributes = leftovers(values, used); // Type, Value Range, Stage, Scope, Proof Point, Follow-up Status…
+      if (effort) input.attributes.effortToApply = effort;
       if (fit && !tier) input.attributes.fit = fit;
       return {
         input,

@@ -139,3 +139,14 @@ describe("starts-with operators and unknown phrasing", () => {
     expect(evaluate([rule({})], { value: "Not disclosed" }, "screen").unknowns).toHaveLength(1);
   });
 });
+
+describe("effort to apply", () => {
+  it("recognises bare effort ratings only", async () => {
+    const { effortFrom } = await import("@/core/types");
+    expect(effortFrom("MEDIUM")).toBe("Medium");
+    expect(effortFrom(" easy ")).toBe("Easy");
+    expect(effortFrom("High")).toBe("Hard");
+    expect(effortFrom("Apply directly via Lever posting")).toBeNull();
+    expect(effortFrom(null)).toBeNull();
+  });
+});

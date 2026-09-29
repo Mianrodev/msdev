@@ -23,6 +23,7 @@ type Col = { head: string; cell: (r: RecordRow) => React.ReactNode; className?: 
 const COLS: Record<ListKey, Col[]> = {
   ready: [
     { head: "Fit", cell: (r) => (r.fitTier ? TIER_NAMES[r.fitTier] : "—") },
+    { head: "Effort to apply", cell: (r) => (typeof r.attributes.effortToApply === "string" ? r.attributes.effortToApply : "—") },
     { head: "Application", cell: (r) => OUTREACH_NAMES[r.outreachStatus] },
     { head: "Link", cell: (r) => <Ext href={r.nextStepUrl ?? r.sourceUrl} label="Open" /> },
   ],

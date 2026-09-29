@@ -37,6 +37,8 @@ describe("workbook import", () => {
     const get = (a: string) => recs.find((r) => r.account === a)!;
     expect(get("Acme Analytics")).toMatchObject({ stage: "verify", status: "active", fitTier: "strong", sourceVerification: "verified", outreachStatus: "package_ready" });
     expect(get("Acme Analytics").preparedBrief).toBe("Placeholder brief");
+    expect(get("Acme Analytics").attributes.effortToApply).toBe("Medium");
+    expect(get("Acme Analytics").nextAction).toBeNull();
     expect(get("Beta Systems")).toMatchObject({ status: "archived", screenVerdict: "reject" });
     expect(get("Gamma Labs")).toMatchObject({ status: "hold", stage: "screen", nextAction: "Read full JD" });
     expect(get("Delta Co").notes).toBe("Archive note");

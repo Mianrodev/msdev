@@ -34,7 +34,7 @@ async function main() {
 
   const pr = wb.addWorksheet("PRIORITY");
   pr.addRow(HEADERS.PRIORITY[0]);
-  const p1 = pr.addRow(HEADERS.PRIORITY[0].map((h) => ({ Fit: "STRONG TARGET", Account: "Acme Analytics", Opportunity: "Implementation Specialist", "Last Verified": "2026-09-25", "Follow-up Status": "Ready to apply", "Prepared Brief": "Placeholder brief", Notes: "Priority note" } as Record<string, string>)[h] ?? null));
+  const p1 = pr.addRow(HEADERS.PRIORITY[0].map((h) => ({ Fit: "STRONG TARGET", Account: "Acme Analytics", Opportunity: "Implementation Specialist", "Last Verified": "2026-09-25", "Follow-up Status": "Ready to apply", "Prepared Brief": "Placeholder brief", Notes: "Priority note", "How To Proceed": "MEDIUM" } as Record<string, string>)[h] ?? null));
   p1.getCell(4).value = { text: "Posting", hyperlink: "https://jobs.example.com/acme/1" };
   pr.addRow(HEADERS.PRIORITY[0].map((h) => ({ Fit: "GOOD TARGET", Account: "Zeta Inc", Opportunity: "GTM Engineer", "Source URL": "https://jobs.example.com/zeta/9", "Last Verified": "2026-09-25" } as Record<string, string>)[h] ?? null));
 

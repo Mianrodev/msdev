@@ -55,6 +55,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const bind = <T,>(fn: (id: string, f: FormData) => Promise<T>) => fn.bind(null, id);
 
   const facts: [string, string | null][] = [
+    ["Effort to apply", typeof r.attributes.effortToApply === "string" ? r.attributes.effortToApply : null],
     ["Location / remote notes", r.location],
     ["Found", r.dateFound ? fmtDay(r.dateFound) : null],
     ["Found on", r.sourceBoard],
