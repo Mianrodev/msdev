@@ -22,16 +22,16 @@ only records that you did.
    The site will say a database needs connecting. That's expected.
 2. In the project: **Storage → Create Database → Neon (Postgres)**, then connect it to
    the project. This sets `DATABASE_URL` automatically.
-3. In the project: **Settings → Environment Variables**, add `APP_PASSWORD` with the
-   password you want to sign in with.
-4. **Deployments → ⋯ → Redeploy.** Every deploy sets up and upgrades the database
+3. **Deployments → ⋯ → Redeploy.** Every deploy sets up and upgrades the database
    automatically, before the new version goes live.
-5. Open the site, sign in, then go to **Import** and upload the tracker workbook.
+4. Open the site **right away**. The first visit asks you to create your password, and
+   whoever does this first owns the app. After that, everyone must sign in.
+5. Go to **Import** and upload the tracker workbook.
 6. In **Rules & settings → Redaction**, add the identity terms that must never appear in
    shared exports.
 
-The app refuses all access if `APP_PASSWORD` isn't set, and every page, form and export
-requires a signed-in session.
+The password is stored only as a salted hash, and you can change it in *Rules &
+settings*. Optionally, an `APP_PASSWORD` environment variable overrides it.
 
 ## Run it on a computer (optional)
 
@@ -43,8 +43,8 @@ npm install
 npm run dev          # sets up the database, then serves http://localhost:3000
 ```
 
-Without `APP_PASSWORD`, local development doesn't ask for a password. Set
-`DATABASE_URL` to use a real Postgres instead.
+The first visit asks you to create a password, just like online. Set
+`DATABASE_URL` to use a real Postgres instead of the embedded one.
 
 ### Import the workbook
 
@@ -146,7 +146,7 @@ It stays a note for human judgement at Verify.
 ```
 src/core/       pure domain logic (no DB): rules, pipeline, dedup, permissions, redaction
 src/db/         Drizzle schema + Postgres client (Neon/any Postgres online, embedded PGlite locally)
-src/lib/        password login (signed session cookie)
+src/lib/        sign-in: first-visit password setup, scrypt hash, signed session cookie
 src/proxy.ts    requires sign-in for every request
 src/services/   workspace-scoped persistence; every change writes History
 src/app/        Next.js UI (server components + server actions) and CSV export routes
@@ -160,6 +160,6 @@ Checks: `npm test`, `npm run typecheck`, `npm run lint`.
 ### Multi-tenant later
 
 `src/services/request.ts#getCtx` is the single place that decides the workspace
-and actor. Replace the single-owner password (`src/lib/session.ts`) with
+and actor. Replace the single-owner password (`src/lib/auth.ts`) with
 per-user accounts, and resolve each user's workspace there. Every query is
 already scoped by `workspace_id`.

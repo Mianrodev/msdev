@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { createRuleAction, identityTermsAction, toggleRuleAction } from "../actions";
+import { changePasswordAction } from "../login/actions";
+import { MIN_PASSWORD_LENGTH, passwordManagedByHost } from "@/lib/auth";
 import { RuleFields } from "@/components/rule-form";
 import { Flash, type SearchParams } from "@/components/ui";
 import { getIdentityTerms, listRules } from "@/services/rules";
@@ -108,6 +110,32 @@ export default async function SettingsPage({ searchParams }: { searchParams: Sea
           </div>
         </form>
       </details>
+
+      <h2>Your password</h2>
+      {passwordManagedByHost() ? (
+        <p className="muted small">Your password is set in the hosting settings (APP_PASSWORD).</p>
+      ) : (
+        <details>
+          <summary>Change password</summary>
+          <form action={changePasswordAction} className="stack" style={{ marginTop: ".5rem", maxWidth: 420 }}>
+            <label>
+              Current password
+              <input type="password" name="current" required autoComplete="current-password" />
+            </label>
+            <label>
+              New password (at least {MIN_PASSWORD_LENGTH} characters)
+              <input type="password" name="password" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
+            </label>
+            <label>
+              Type it again
+              <input type="password" name="confirm" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
+            </label>
+            <div>
+              <button type="submit">Change password</button>
+            </div>
+          </form>
+        </details>
+      )}
     </>
   );
 }

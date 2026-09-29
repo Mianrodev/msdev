@@ -12,6 +12,7 @@ function summary(r: ImportReport) {
 }
 
 export async function importAction(f: FormData) {
+  const ctx = await getCtx();
   const file = f.get("file");
   let target = "/import";
   if (!(file instanceof File) || file.size === 0) {
@@ -20,7 +21,6 @@ export async function importAction(f: FormData) {
     target = `/import?error=${encodeURIComponent("That isn't an .xlsx file.")}`;
   } else {
     try {
-      const ctx = await getCtx();
       const report = await importWorkbook(ctx, { name: file.name, data: Buffer.from(await file.arrayBuffer()) }, { force: f.get("force") === "on" });
       revalidatePath("/", "layout");
       target = `/import?ok=${encodeURIComponent(`Imported ${report.file}. Nothing was lost:\n${summary(report)}`)}`;

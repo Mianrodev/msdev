@@ -5,21 +5,19 @@
  */
 import "server-only";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
-import { authRequired, SESSION_COOKIE, verifySessionToken } from "@/lib/session";
+import { isValidSession } from "@/lib/auth";
+import { SESSION_COOKIE } from "@/lib/session";
 import { DEFAULT_WORKSPACE_ID, ensureWorkspace, type Ctx } from "./context";
-
-export class UnauthorizedError extends Error {}
 
 let ready: Promise<void> | undefined;
 
+/** Every page, form action and export gets its context here — and is refused unless signed in. */
 export async function getCtx(): Promise<Ctx> {
-  // Defence in depth: proxy.ts already gates every request; data access checks again.
-  if (authRequired() && !(await verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value))) {
-    throw new UnauthorizedError("Not signed in");
-  }
   const db = await getDb();
   ready ??= ensureWorkspace(db);
   await ready;
+  if (!(await isValidSession(db, (await cookies()).get(SESSION_COOKIE)?.value))) redirect("/login");
   return { db, workspaceId: DEFAULT_WORKSPACE_ID, actor: { kind: "human", id: "owner" } };
 }
