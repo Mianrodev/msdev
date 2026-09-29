@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as schema from "./schema";
 
-export type Db = BetterSQLite3Database<typeof schema>;
+export type Db = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
 
 export const DEFAULT_DB_PATH = path.resolve(process.cwd(), process.env.DATABASE_PATH ?? "data/crm.db");
 const MIGRATIONS = path.resolve(process.cwd(), "drizzle");
