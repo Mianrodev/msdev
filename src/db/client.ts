@@ -11,7 +11,7 @@
  */
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import path from "node:path";
-import { databaseUrl, missingHostedDatabase } from "@/lib/env";
+import { databaseUrl, directDatabaseUrl, missingHostedDatabase } from "@/lib/env";
 import * as schema from "./schema";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -22,7 +22,7 @@ export { databaseUrl };
 
 /** Direct (unpooled) URL for migrations when the provider offers one. */
 function migrationUrl(): string | undefined {
-  return process.env.DATABASE_URL_UNPOOLED || process.env.POSTGRES_URL_NON_POOLING || databaseUrl();
+  return directDatabaseUrl() || databaseUrl();
 }
 
 export function localDataDir(): string {
