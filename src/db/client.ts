@@ -7,8 +7,8 @@ import * as schema from "./schema";
 
 export type Db = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
 
-export const DEFAULT_DB_PATH = path.resolve(process.cwd(), process.env.DATABASE_PATH ?? "data/crm.db");
-const MIGRATIONS = path.resolve(process.cwd(), "drizzle");
+export const DEFAULT_DB_PATH = path.resolve(/*turbopackIgnore: true*/ process.cwd(), process.env.DATABASE_PATH ?? "data/crm.db");
+const MIGRATIONS = path.resolve(/*turbopackIgnore: true*/ process.cwd(), "drizzle");
 
 /** Open (and migrate) a database. `:memory:` is supported for tests. */
 export function openDb(file: string = DEFAULT_DB_PATH): Db {
