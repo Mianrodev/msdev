@@ -6,8 +6,36 @@
  */
 import { databaseUrl, localDataDir, migrateDb } from "../src/db/client";
 import { DEFAULT_WORKSPACE_ID, ensureWorkspace } from "../src/services/context";
-import { seedDefaultRules } from "../src/services/rules";
+import { and, eq, inArray } from "drizzle-orm";
+import { rules } from "../src/db/schema";
+import { logHistory } from "../src/services/history";
+import { DEFAULT_RULES, seedDefaultRules } from "../src/services/rules";
 import { syncIdentityTerms } from "./lib/identity";
+import { DERIVED_CRITERIA } from "./lib/import-tracker";
+import type { Ctx } from "../src/services/context";
+
+/** Old built-in wording that pointed at code or used jargon — safe to replace. */
+const OLD_WORDING = /Enforced in core\/|From CONFIG ›|Example criterion|^A fact that isn't known|^A source that can't be reached|^The tool never submits|^A record can advance/;
+
+/** Keep the built-in rules' names and descriptions current, unless the owner has reworded them. */
+async function refreshBuiltInWording(ctx: Ctx) {
+  const builtIn = new Map([...DEFAULT_RULES, ...DERIVED_CRITERIA].map((r) => [r.key, r]));
+  const rows = await ctx.db
+    .select()
+    .from(rules)
+    .where(and(eq(rules.workspaceId, ctx.workspaceId), inArray(rules.key, [...builtIn.keys()])));
+  let n = 0;
+  for (const row of rows) {
+    const latest = builtIn.get(row.key)!;
+    if (!OLD_WORDING.test(row.description)) continue;
+    await ctx.db
+      .update(rules)
+      .set({ label: latest.label, description: latest.description ?? "" })
+      .where(and(eq(rules.workspaceId, ctx.workspaceId), eq(rules.id, row.id)));
+    n++;
+  }
+  if (n) await logHistory(ctx, { entityType: "rule", event: "updated", reason: `Clearer wording for ${n} built-in rules` });
+}
 
 async function main() {
   if (!databaseUrl() && process.env.VERCEL) {
@@ -19,6 +47,7 @@ async function main() {
   await ensureWorkspace(db);
   const ctx = { db, workspaceId: DEFAULT_WORKSPACE_ID, actor: { kind: "human" as const, id: "owner" } };
   await seedDefaultRules(ctx);
+  await refreshBuiltInWording(ctx);
   const n = await syncIdentityTerms(ctx);
   console.log(`Database ready: ${databaseUrl() ? "Postgres (DATABASE_URL)" : localDataDir()}${n ? ` (${n} redaction terms loaded)` : ""}`);
   process.exit(0);

@@ -10,6 +10,7 @@ import { summarize } from "./rules";
 import {
   nextStage,
   VERDICTS,
+  STEP_WORDS,
   VERDICT_LABELS,
   type DecisionStage,
   type FitTier,
@@ -134,21 +135,21 @@ export function decide(state: PipelineState, decision: Decision, evaluation: Eva
         stage: decision.stage,
         status: "active",
         fitTier: TIER[decision.verdict] ?? null,
-        summary: `${decision.stage}: ${label} — ${reason} [${criteria}]`,
+        summary: `${STEP_WORDS[decision.stage]}: ${label} — ${reason} (${criteria})`,
       };
     case "hold":
       return {
         stage: state.stage,
         status: "hold",
         holdReason: reason,
-        summary: `${decision.stage}: ${label} — ${reason}`,
+        summary: `${STEP_WORDS[decision.stage]}: ${label} — ${reason}`,
       };
     case "archive":
       return {
         stage: state.stage,
         status: "archived",
         archiveReason: `${label}: ${reason}`,
-        summary: `${decision.stage}: ${label} — ${reason}`,
+        summary: `${STEP_WORDS[decision.stage]}: ${label} — ${reason}`,
       };
     default:
       throw new PipelineError(`Unhandled verdict ${decision.verdict}`);
@@ -190,17 +191,17 @@ export function reconcileDecision(sourceVerification: SourceVerification, evalua
   if (evaluation.fails.length > 0) {
     return {
       action: "archive",
-      reason: `Reconciliation: no longer meets criteria — ${evaluation.fails.map((f) => f.reason).join("; ")}`,
+      reason: `Weekly re-check: no longer fits your rules — ${evaluation.fails.map((f) => f.reason).join("; ")}`,
     };
   }
   if (evaluation.holds.length > 0) {
     return {
       action: "hold",
-      reason: `Reconciliation: needs review — ${evaluation.holds.map((f) => f.reason).join("; ")}`,
+      reason: `Weekly re-check: needs a look — ${evaluation.holds.map((f) => f.reason).join("; ")}`,
     };
   }
   if (sourceVerification !== "verified") {
-    return { action: "hold", reason: `Reconciliation: source is ${sourceVerification}; needs re-verification` };
+    return { action: "hold", reason: `Weekly re-check: the listing ${sourceVerification === "unreachable" ? "couldn't be reached" : "hasn't been checked yet"} — check the link is still open` };
   }
-  return { action: "keep", reason: `Reconciliation: still qualifies [${summarize(evaluation)}]` };
+  return { action: "keep", reason: `Weekly re-check: still fits (${summarize(evaluation)})` };
 }

@@ -1,23 +1,22 @@
 import { createLeadAction } from "../../actions";
+import { SubmitButton } from "@/components/client";
 import { RecordFields } from "@/components/record-fields";
-import { Flash, type SearchParams } from "@/components/ui";
+import { BackLink, Flash, PageHeader, type SearchParams } from "@/components/ui";
 
 export default async function NewLead({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
   return (
     <>
       <Flash sp={sp} />
-      <h1>New lead</h1>
-      <p className="muted">
-        Stage 1 — Discovery. If a record with the same account, opportunity and source/next-step URL exists, it is updated in
-        place instead of duplicated.
-      </p>
+      <BackLink href="/records?list=checking">Back to Leads</BackLink>
+      <PageHeader
+        title="Add a lead"
+        intro="Found an opening or a company to approach? Add it here. Only the company and the opportunity are required. If you already have this lead, it's updated instead of added twice."
+      />
       <form action={createLeadAction} className="card stack">
         <RecordFields compact />
         <div>
-          <button type="submit" className="primary">
-            Save lead
-          </button>
+          <SubmitButton pending="Saving…">Add lead</SubmitButton>
         </div>
       </form>
     </>

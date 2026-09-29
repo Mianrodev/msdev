@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   archiveAction,
@@ -10,26 +9,35 @@ import {
   sourceVerificationAction,
   updateRecordAction,
 } from "../../actions";
+import { CopyButton, SubmitButton } from "@/components/client";
+import {
+  actorName,
+  DECISION_NAMES,
+  DECISION_STEP_TITLES,
+  eventName,
+  fmtDay,
+  fmtWhen,
+  humanize,
+  listOf,
+  LISTS,
+  OUTREACH_NAMES,
+  SOURCE_NAMES,
+  statusPhrase,
+  TIER_NAMES,
+} from "@/components/plain";
 import { AttributeFields, RecordFields } from "@/components/record-fields";
-import { Ext, Flash, fmtDate, Outcome, StageLabel, StatusBadge, Verdict, type SearchParams } from "@/components/ui";
+import { BackLink, Checks, Ext, Flash, StatusPill, type SearchParams } from "@/components/ui";
+import { FIT_TIERS, SOURCE_VERIFICATION, VERDICTS } from "@/core/types";
 import { listHistory } from "@/services/history";
 import { evaluateRecord, getRecord, NotFoundError, pendingDecision } from "@/services/records";
 import { getCtx } from "@/services/request";
-import {
-  FIT_TIERS,
-  HUMAN_ONLY_OUTREACH,
-  OUTREACH_STATUSES,
-  SOURCE_VERIFICATION,
-  VERDICT_LABELS,
-  VERDICTS,
-} from "@/core/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function RecordPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
+export default async function LeadPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
   const { id } = await params;
   const sp = await searchParams;
-  const ctx = (await getCtx());
+  const ctx = await getCtx();
   let r;
   try {
     r = await getRecord(ctx, id);
@@ -37,274 +45,353 @@ export default async function RecordPage({ params, searchParams }: { params: Pro
     if (e instanceof NotFoundError) notFound();
     throw e;
   }
-  const pending = await pendingDecision(ctx, r);
-  const overall = await evaluateRecord(ctx, r, "all");
-  const hist = await listHistory(ctx, { entityType: "record", entityId: id, limit: 200 });
+  const [pending, overall, hist] = await Promise.all([
+    pendingDecision(ctx, r),
+    evaluateRecord(ctx, r, "all"),
+    listHistory(ctx, { entityType: "record", entityId: id, limit: 200 }),
+  ]);
+  const list = listOf(r);
+  const link = r.nextStepUrl ?? r.sourceUrl;
   const bind = <T,>(fn: (id: string, f: FormData) => Promise<T>) => fn.bind(null, id);
+
+  const facts: [string, string | null][] = [
+    ["Location / remote notes", r.location],
+    ["Found", r.dateFound ? fmtDay(r.dateFound) : null],
+    ["Found on", r.sourceBoard],
+    ["Location fit", r.locationFit],
+    ["Pay / value fit", r.valueFit],
+    ["Requirements", r.requirements],
+    ["Gaps (must-haves missing)", r.gapsHard],
+    ["Gaps (nice-to-haves missing)", r.gapsSoft],
+    ["Why it fits", r.fitRationale],
+    ["How to proceed / next action", r.nextAction],
+    ["Notes", r.notes],
+    ["Response notes", r.responseNotes],
+  ];
 
   return (
     <>
       <Flash sp={sp} />
-      <p className="small">
-        <Link href="/records">← Records</Link>
-      </p>
+      <BackLink href={`/records?list=${list}`}>Back to {LISTS[list].title}</BackLink>
       <div className="spread">
-        <div>
-          <h1 style={{ marginBottom: ".2rem" }}>{r.opportunity}</h1>
-          <div className="row">
+        <div style={{ flex: "1 1 420px" }}>
+          <h1>{r.opportunity}</h1>
+          <p style={{ fontSize: "1.1rem", margin: ".1rem 0 .6rem" }}>
             <strong>{r.account}</strong>
-            <span className="muted">·</span>
-            <StageLabel stage={r.stage} />
-            <StatusBadge status={r.status} />
-            {r.fitTier && <span className="badge">tier: {r.fitTier}</span>}
-            <span className="badge">source: {r.sourceVerification}</span>
-            <span className="badge">outreach: {r.outreachStatus.replace(/_/g, " ")}</span>
-          </div>
+          </p>
+          <StatusPill r={r} />
         </div>
-        <div className="small muted">
-          Source: <Ext href={r.sourceUrl} />
-          <br />
-          Next step: <Ext href={r.nextStepUrl} />
-        </div>
+        {link && (
+          <a className="button" href={/^https?:\/\//i.test(link) ? link : `https://${link}`} target="_blank" rel="noreferrer noopener">
+            Open the listing ↗
+          </a>
+        )}
       </div>
-      {r.status === "hold" && <p className="note">On hold: {r.holdReason}{r.nextAction ? ` — next: ${r.nextAction}` : ""}</p>}
-      {r.status === "archived" && <p className="note">Archived: {r.archiveReason}</p>}
 
-      <div className="grid cols-2" style={{ marginTop: "1rem" }}>
-        <section className="card">
-          <h2 style={{ marginTop: 0 }}>Pipeline</h2>
-          <dl className="kv small">
-            <dt>1. Discovery</dt>
-            <dd>
-              {r.discoveryVerdict ?? "—"}
-              {r.discoveryReason ? <span className="muted"> — {r.discoveryReason}</span> : null}
-            </dd>
-            <dt>2. Screen</dt>
-            <dd>
-              <Verdict v={r.screenVerdict} />
-              {r.screenReason ? <span className="muted"> — {r.screenReason}</span> : null}
-            </dd>
-            <dt>2.5 Triage</dt>
-            <dd>
-              <Verdict v={r.triageVerdict} />
-              {r.triageReason ? <span className="muted"> — {r.triageReason}</span> : null}
-            </dd>
-            <dt>3. Verify</dt>
-            <dd>
-              <Verdict v={r.verifyVerdict} />
-              {r.verifyReason ? <span className="muted"> — {r.verifyReason}</span> : null}
-            </dd>
-          </dl>
+      {/* ---------------- What to do next ---------------- */}
+      <section className="next-box" style={{ margin: "1.2rem 0" }}>
+        <h2>What to do next</h2>
+        {list === "ready" && (
+          <>
+            {["not_started", "package_ready", "approved"].includes(r.outreachStatus) ? (
+              <>
+                <ol style={{ margin: ".2rem 0 .8rem", paddingLeft: "1.2rem" }}>
+                  <li>Read the prepared brief and answers below (use the Copy buttons).</li>
+                  <li>Open the listing and apply yourself. This app never applies or sends anything for you.</li>
+                  <li>Come back and press &quot;I&apos;ve applied&quot; so you can keep track.</li>
+                </ol>
+                <form action={bind(outreachAction)}>
+                  <input type="hidden" name="status" value="sent_manually" />
+                  <input type="hidden" name="confirmed" value="yes" />
+                  <input type="hidden" name="reason" value="Marked as applied by you" />
+                  <SubmitButton confirm="Did you apply / send this yourself?">I&apos;ve applied / sent it</SubmitButton>
+                </form>
+              </>
+            ) : r.outreachStatus === "sent_manually" ? (
+              <>
+                <p>You&apos;ve applied. When they get back to you, record it here.</p>
+                <div className="row">
+                  <form action={bind(outreachAction)}>
+                    <input type="hidden" name="status" value="responded" />
+                    <input type="hidden" name="confirmed" value="yes" />
+                    <SubmitButton confirm="Did they reply to you?">They replied</SubmitButton>
+                  </form>
+                  <form action={bind(outreachAction)}>
+                    <input type="hidden" name="status" value="closed" />
+                    <SubmitButton className="">Close it (no longer pursuing)</SubmitButton>
+                  </form>
+                </div>
+              </>
+            ) : (
+              <p>
+                Application status: <strong>{OUTREACH_NAMES[r.outreachStatus]}</strong>. Add anything useful in Response
+                notes under Details.
+              </p>
+            )}
+          </>
+        )}
 
-          {pending ? (
+        {list === "checking" && pending && (
+          <>
+            <p>
+              This lead is still being checked. <strong>Easiest:</strong> run the weekly check on the Home page and it will be
+              sorted for you. Or make the decision yourself:
+            </p>
+            <form action={bind(decideAction)} className="stack" style={{ marginTop: ".6rem" }}>
+              <input type="hidden" name="stage" value={pending.stage} />
+              <div>
+                <strong>{DECISION_STEP_TITLES[pending.stage].title}:</strong> {DECISION_STEP_TITLES[pending.stage].question}
+              </div>
+              <div className="fields">
+                <label>
+                  Your decision {pending.suggested && <span className="hint">(suggested: {DECISION_NAMES[pending.suggested]})</span>}
+                  <select name="verdict" defaultValue={pending.suggested}>
+                    {VERDICTS[pending.stage].map((v) => (
+                      <option key={v} value={v}>
+                        {DECISION_NAMES[v]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Why? <span className="hint">(a few words — required)</span>
+                  <input name="reason" required placeholder="e.g. Remote and pay looks right" />
+                </label>
+              </div>
+              <div>
+                <SubmitButton pending="Saving…">Save decision</SubmitButton>
+              </div>
+            </form>
+          </>
+        )}
+
+        {list === "hold" && (
+          <>
+            <p>
+              <strong>Why it&apos;s on hold:</strong> {r.holdReason ?? "No reason given."}
+            </p>
+            {r.nextAction && (
+              <p>
+                <strong>What&apos;s needed:</strong> {r.nextAction}
+              </p>
+            )}
+            <p>
+              When you have the missing information, update the details below
+              {r.stage === "verify" ? ' and set "Is the link still open?"' : ""}, then put it back.
+            </p>
+            <form action={bind(restoreAction)} className="inline" style={{ marginTop: ".5rem" }}>
+              <input type="hidden" name="reason" value="Put back by you" />
+              <SubmitButton pending="Putting it back…">Put it back</SubmitButton>
+            </form>
+          </>
+        )}
+
+        {list === "archive" && (
+          <>
+            <p>
+              <strong>Why it was archived:</strong> {r.archiveReason ?? "No reason given."}
+            </p>
+            <p>Archived leads are kept for your records. Changed your mind?</p>
+            <form action={bind(restoreAction)} className="inline" style={{ marginTop: ".5rem" }}>
+              <input type="hidden" name="reason" value="Put back by you" />
+              <SubmitButton className="" pending="Putting it back…">
+                Put it back
+              </SubmitButton>
+            </form>
+          </>
+        )}
+      </section>
+
+      {/* ---------------- Prepared package ---------------- */}
+      {(r.preparedBrief || r.preparedAnswers) && (
+        <section className="card" style={{ marginBottom: "1rem" }}>
+          <h2>Prepared package</h2>
+          {r.preparedBrief && (
             <>
-              <h3>Decide: {pending.stage}</h3>
-              <ul className="plain small">
-                {pending.evaluation.results.map((x) => (
-                  <Outcome key={x.key} r={x} />
-                ))}
-                {pending.evaluation.results.length === 0 && <li className="muted">No evaluable criteria apply at this stage.</li>}
-              </ul>
-              <form action={bind(decideAction)} className="stack" style={{ marginTop: ".5rem" }}>
-                <input type="hidden" name="stage" value={pending.stage} />
-                <div className="fields">
-                  <label>
-                    Verdict (suggested: {VERDICT_LABELS[pending.suggested ?? ""] ?? "—"})
-                    <select name="verdict" defaultValue={pending.suggested}>
-                      {VERDICTS[pending.stage].map((v) => (
-                        <option key={v} value={v}>
-                          {VERDICT_LABELS[v]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Confidence (0–100, optional)
-                    <input name="confidence" type="number" min={0} max={100} />
-                  </label>
-                  <label className="full">
-                    Reason (required)
-                    <textarea name="reason" rows={2} required />
-                  </label>
-                </div>
-                <div>
-                  <button type="submit" className="primary">
-                    Record decision
-                  </button>
-                </div>
-              </form>
+              <div className="spread">
+                <h3>Brief (cover letter)</h3>
+                <CopyButton text={r.preparedBrief} label="Copy brief" />
+              </div>
+              <div className="package">{r.preparedBrief}</div>
             </>
-          ) : (
+          )}
+          {r.preparedAnswers && (
             <>
-              <h3>Current criteria check</h3>
-              <ul className="plain small">
-                {overall.results.map((x) => (
-                  <Outcome key={x.key} r={x} />
-                ))}
-                {overall.results.length === 0 && <li className="muted">No evaluable criteria.</li>}
-              </ul>
+              <div className="spread">
+                <h3>Prepared answers</h3>
+                <CopyButton text={r.preparedAnswers} label="Copy answers" />
+              </div>
+              <div className="package">{r.preparedAnswers}</div>
             </>
           )}
         </section>
+      )}
 
+      <div className="grid cols-2">
+        {/* ---------------- Checks ---------------- */}
         <section className="card">
-          <h2 style={{ marginTop: 0 }}>Status</h2>
-          {r.status !== "active" ? (
-            <form action={bind(restoreAction)} className="inline">
-              <label style={{ flex: 1 }}>
-                Reason to restore
-                <input name="reason" required />
-              </label>
-              <button type="submit">Restore to active</button>
-            </form>
-          ) : null}
+          <h2>Checks against your rules</h2>
+          <p className="muted small">
+            ✓ OK · ✗ fails (it will be archived) · ! needs a look (it goes on hold) · ? not known yet (never counts against it)
+          </p>
+          <Checks results={overall.results} />
+        </section>
+
+        {/* ---------------- Link status ---------------- */}
+        <section className="card">
+          <h2>Is the link still open?</h2>
+          <p className="muted small">
+            A lead can only be Ready once you (or your research) have checked the listing is still open. Currently:{" "}
+            <strong>{SOURCE_NAMES[r.sourceVerification]}</strong>.
+          </p>
+          <form action={bind(sourceVerificationAction)} className="inline">
+            <label style={{ flex: "1 1 200px" }}>
+              Link status
+              <select name="value" defaultValue={r.sourceVerification}>
+                {SOURCE_VERIFICATION.map((s) => (
+                  <option key={s} value={s}>
+                    {SOURCE_NAMES[s]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <input type="hidden" name="reason" value="Updated by you" />
+            <SubmitButton className="" pending="Saving…">
+              Save
+            </SubmitButton>
+          </form>
+          <p className="small" style={{ marginTop: ".6rem" }}>
+            Links: <Ext href={r.sourceUrl} label="listing" /> {r.nextStepUrl && r.nextStepUrl !== r.sourceUrl && <> · <Ext href={r.nextStepUrl} label="apply page" /></>}
+          </p>
+        </section>
+      </div>
+
+      {/* ---------------- Details ---------------- */}
+      <section className="card" style={{ marginTop: "1rem" }}>
+        <h2>Details</h2>
+        <dl className="kv">
+          {facts
+            .filter(([, v]) => v)
+            .map(([k, v]) => (
+              <div key={k} style={{ display: "contents" }}>
+                <dt>{k}</dt>
+                <dd>{v}</dd>
+              </div>
+            ))}
+          {r.fitTier && (
+            <>
+              <dt>Fit rating</dt>
+              <dd>{TIER_NAMES[r.fitTier]}</dd>
+            </>
+          )}
+        </dl>
+        {facts.every(([, v]) => !v) && <p className="muted">No details yet.</p>}
+
+        <details style={{ marginTop: "1rem" }}>
+          <summary>Edit details</summary>
+          <form action={bind(updateRecordAction)} className="stack">
+            <RecordFields r={r} />
+            <h3>Details the rules check</h3>
+            <p className="muted small">
+              These are what your rules look at. If you don&apos;t know something, leave it empty or type &quot;unknown&quot; —
+              never guess.
+            </p>
+            <AttributeFields attributes={r.attributes} />
+            <div>
+              <SubmitButton pending="Saving…">Save changes</SubmitButton>
+            </div>
+          </form>
+        </details>
+      </section>
+
+      {/* ---------------- More actions ---------------- */}
+      <details className="card" style={{ marginTop: "1rem" }}>
+        <summary>More actions (hold, archive, fit rating)</summary>
+        <div className="grid cols-2">
           {r.status !== "hold" && (
-            <form action={bind(holdAction)} className="inline" style={{ marginTop: ".5rem" }}>
-              <label style={{ flex: 1 }}>
-                Hold reason
-                <input name="reason" required />
+            <form action={bind(holdAction)} className="stack">
+              <h3>Put on hold</h3>
+              <label>
+                Why? <span className="hint">(required)</span>
+                <input name="reason" required placeholder="e.g. Pay not listed" />
               </label>
-              <label style={{ flex: 1 }}>
-                Next action needed
-                <input name="nextAction" />
+              <label>
+                What&apos;s needed? <span className="hint">(optional)</span>
+                <input name="nextAction" placeholder="e.g. Ask the recruiter about pay" />
               </label>
-              <button type="submit">Move to Hold</button>
+              <div>
+                <SubmitButton className="" pending="Saving…">
+                  Move to On hold
+                </SubmitButton>
+              </div>
             </form>
           )}
           {r.status !== "archived" && (
-            <form action={bind(archiveAction)} className="inline" style={{ marginTop: ".5rem" }}>
-              <label style={{ flex: 1 }}>
-                Archive reason
-                <input name="reason" required />
+            <form action={bind(archiveAction)} className="stack">
+              <h3>Archive</h3>
+              <label>
+                Why? <span className="hint">(required)</span>
+                <input name="reason" required placeholder="e.g. Position filled" />
               </label>
-              <button type="submit" className="danger">
-                Archive
-              </button>
+              <p className="muted small">Nothing is deleted — you can put it back any time.</p>
+              <div>
+                <SubmitButton className="danger" pending="Saving…">
+                  Archive
+                </SubmitButton>
+              </div>
             </form>
           )}
-          <p className="muted small">Records are never deleted. Archive keeps everything and can be restored.</p>
-
-          <h3>Source verification</h3>
-          <form action={bind(sourceVerificationAction)} className="inline">
-            <select name="value" defaultValue={r.sourceVerification}>
-              {SOURCE_VERIFICATION.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-            <label style={{ flex: 1 }}>
-              How verified
-              <input name="reason" placeholder="e.g. listing loads, title matches" />
-            </label>
-            <button type="submit">Save</button>
-          </form>
-
           {r.stage === "verify" && (
-            <>
-              <h3>Fit tier</h3>
-              <form action={bind(fitTierAction)} className="inline">
-                <select name="tier" defaultValue={r.fitTier ?? ""}>
-                  <option value="">none</option>
-                  {FIT_TIERS.map((t) => (
-                    <option key={t}>{t}</option>
-                  ))}
-                </select>
-                <label style={{ flex: 1 }}>
-                  Reason
-                  <input name="reason" required />
-                </label>
-                <button type="submit">Save</button>
-              </form>
-            </>
-          )}
-
-          <h3>Outreach hand-off</h3>
-          <p className="muted small">
-            This app never sends or submits anything. Mark a package ready here; after <em>you</em> approve and send it yourself,
-            record that below.
-          </p>
-          <form action={bind(outreachAction)} className="stack">
-            <div className="fields">
+            <form action={bind(fitTierAction)} className="stack">
+              <h3>Fit rating</h3>
               <label>
-                Status
-                <select name="status" defaultValue={r.outreachStatus}>
-                  {OUTREACH_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s.replace(/_/g, " ")}
-                      {HUMAN_ONLY_OUTREACH.includes(s) ? " (you did this)" : ""}
+                How good a fit is it?
+                <select name="tier" defaultValue={r.fitTier ?? ""}>
+                  <option value="">No rating</option>
+                  {FIT_TIERS.map((t) => (
+                    <option key={t} value={t}>
+                      {TIER_NAMES[t]}
                     </option>
                   ))}
                 </select>
               </label>
-              <label>
-                Note
-                <input name="reason" />
-              </label>
-            </div>
-            <label className="check">
-              <input type="checkbox" name="confirm" /> I approved / sent / received this myself, outside the app
-            </label>
-            <div>
-              <button type="submit">Update outreach</button>
-            </div>
-          </form>
-        </section>
-      </div>
+              <input type="hidden" name="reason" value="Changed by you" />
+              <div>
+                <SubmitButton className="" pending="Saving…">
+                  Save rating
+                </SubmitButton>
+              </div>
+            </form>
+          )}
+        </div>
+      </details>
 
-      <section className="card" style={{ marginTop: "1rem" }}>
-        <h2 style={{ marginTop: 0 }}>Details</h2>
-        <form action={bind(updateRecordAction)} className="stack">
-          <RecordFields r={r} />
-          <h3>Criteria attributes</h3>
-          <p className="muted small">Values the rules evaluate (field names in Rules &amp; settings). Use UNKNOWN when not known.</p>
-          <AttributeFields attributes={r.attributes} />
-          <label>
-            Change note (optional)
-            <input name="reason" />
-          </label>
-          <div>
-            <button type="submit" className="primary">
-              Save details
-            </button>
-          </div>
-        </form>
-        {Object.keys(r.extra).length > 0 && (
-          <details style={{ marginTop: "1rem" }}>
-            <summary>Unmapped imported columns</summary>
-            <pre className="mono">{JSON.stringify(r.extra, null, 2)}</pre>
-          </details>
-        )}
-        <p className="muted small">
-          Created {fmtDate(r.createdAt)} ({r.origin}) · updated {fmtDate(r.updatedAt)} · last reconciled {fmtDate(r.lastReconciledAt)}
-        </p>
-      </section>
-
-      <h2>History</h2>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Event</th>
-              <th>From → to</th>
-              <th>Reason</th>
-              <th>By</th>
-            </tr>
-          </thead>
-          <tbody>
-            {hist.map((h) => (
-              <tr key={h.id}>
-                <td className="small">{fmtDate(h.occurredAt)}</td>
-                <td className="small">{h.event}</td>
-                <td className="small">
-                  {h.priorStatus ?? "—"} → {h.newStatus ?? "—"}
-                </td>
-                <td className="small wrap">{h.reason}</td>
-                <td className="small muted">{h.actor}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {/* ---------------- History ---------------- */}
+      <details className="card" style={{ marginTop: "1rem" }}>
+        <summary>History of this lead ({hist.length})</summary>
+        <ul className="plain small">
+          {hist.map((h) => (
+            <li key={h.id}>
+              <strong>{eventName(h.event)}</strong>
+              {h.newStatus && h.priorStatus !== h.newStatus && <> → {statusPhrase(h.newStatus)}</>}
+              <span className="muted">
+                {" "}
+                · {fmtWhen(h.occurredAt)} · {actorName(h.actor)}
+              </span>
+              {h.reason && <div className="muted">{humanizeReason(h.reason)}</div>}
+            </li>
+          ))}
+        </ul>
+      </details>
     </>
   );
+}
+
+/** Stored reasons can contain internal verdict codes; show their plain names. */
+function humanizeReason(reason: string): string {
+  return reason
+    .replace(/\b(screen|triage|verify): /, "")
+    .replace(/\[[^\]]*criteria verified\]/, "")
+    .replace(/\b[a-z]+(?:_[a-z]+)+\b/g, (m) => DECISION_NAMES[m] ?? humanize(m))
+    .trim();
 }

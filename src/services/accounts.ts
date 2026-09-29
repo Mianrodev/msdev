@@ -101,7 +101,7 @@ export async function upsertAccount(ctx: Ctx, input: AccountInput, origin = "man
       event: "dedup_merge",
       priorStatus: existing.status,
       newStatus: existing.status,
-      reason: changed.length ? `Repeat; updated in place: ${changed.join(", ")}` : "Repeat; no new information",
+      reason: changed.length ? "Added again — updated this company instead of making a copy" : "Added again — nothing new",
     });
     return { account: await getAccount(ctx, existing.id), created: false };
   }
@@ -109,7 +109,7 @@ export async function upsertAccount(ctx: Ctx, input: AccountInput, origin = "man
   await ctx.db
     .insert(targetAccounts)
     .values({ ...patch, id, workspaceId: ctx.workspaceId, dedupKey: key, name, origin });
-  await logHistory(ctx, { entityType: "target_account", entityId: id, event: "created", newStatus: "tracking", reason: `Added (${origin})` });
+  await logHistory(ctx, { entityType: "target_account", entityId: id, event: "created", newStatus: "tracking", reason: origin.startsWith("import:") ? "Added from your spreadsheet" : "Added by you" });
   return { account: await getAccount(ctx, id), created: true };
 }
 
@@ -145,7 +145,7 @@ export async function updateAccount(ctx: Ctx, id: string, input: AccountInput, r
     event: "updated",
     priorStatus: existing.status,
     newStatus: existing.status,
-    reason: reason || `Edited: ${changed.join(", ")}`,
+    reason: reason || `Edited ${changed.length} ${changed.length === 1 ? "detail" : "details"}`,
     detail: { changed },
   });
   return await getAccount(ctx, id);

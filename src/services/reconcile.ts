@@ -87,7 +87,7 @@ export async function reconcileExisting(ctx: Ctx): Promise<ReconcileReport> {
     } else {
       report.heldChecked++;
       if (evaluation.fails.length > 0) {
-        const reason = `Reconciliation: no longer meets criteria — ${evaluation.fails.map((f) => f.reason).join("; ")}`;
+        const reason = `Weekly re-check: no longer fits your rules — ${evaluation.fails.map((f) => f.reason).join("; ")}`;
         await apply(r, "archived", reason, evaluation.results);
         report.archived++;
       }
@@ -105,7 +105,7 @@ export async function runReconciliation(ctx: Ctx): Promise<ReconcileReport> {
     await logHistory(asSystem(c, "reconciliation"), {
       entityType: "reconciliation",
       event: "run",
-      reason: `Prospects checked ${report.prospectsChecked}, held checked ${report.heldChecked}: kept ${report.kept}, to hold ${report.held}, to archive ${report.archived}`,
+      reason: `Re-checked ${report.prospectsChecked} Ready and ${report.heldChecked} On-hold leads: ${report.held} moved to On hold, ${report.archived} moved to Archived`,
       detail: { changes: report.changes.map((x) => ({ id: x.id, from: x.from, to: x.to })) },
     });
     return report;

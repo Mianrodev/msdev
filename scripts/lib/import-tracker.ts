@@ -345,7 +345,7 @@ export const DERIVED_CRITERIA: RuleInput[] = [
   {
     key: "criteria.location.not_blocked",
     label: "Location not blocked",
-    description: "From CONFIG › Location eligibility / On-site mislabeled. Screen-stage location confidence of BLOCKED is a genuine violation.",
+    description: "From your spreadsheet's rules (location eligibility, on-site roles). If the location check says BLOCKED, the lead is archived.",
     appliesFrom: "screen",
     field: "locationConfidence",
     operator: "excludes_all",
@@ -355,7 +355,7 @@ export const DERIVED_CRITERIA: RuleInput[] = [
   {
     key: "criteria.location.verified_fit",
     label: "Verified location fit is not NO",
-    description: "From CONFIG › Location eligibility. At Verify, a verified location fit of NO (on-site, region-restricted…) rejects. UNKNOWN/AMBIGUOUS do not.",
+    description: "From your spreadsheet's rules (location eligibility). At the final check, if the confirmed location fit is NO (on-site, wrong region…), the lead is archived. Unknown or unclear doesn't count against it.",
     appliesFrom: "verify",
     field: "verifiedLocationFit",
     operator: "not_starts_with_any",
@@ -365,7 +365,7 @@ export const DERIVED_CRITERIA: RuleInput[] = [
   {
     key: "criteria.open.verified_open",
     label: "Listing still open",
-    description: "From CONFIG › Dead links. A listing verified as no longer open is closed.",
+    description: "From your spreadsheet's rules — Dead links. A listing verified as no longer open is closed.",
     appliesFrom: "verify",
     field: "verifiedOpen",
     operator: "not_starts_with_any",
@@ -375,7 +375,7 @@ export const DERIVED_CRITERIA: RuleInput[] = [
   {
     key: "criteria.value.not_below_floor",
     label: "Verified value not below floor",
-    description: "From CONFIG › Compensation floor. Rejects only when verification explicitly recorded the value as below floor.",
+    description: "From your spreadsheet's rules — Compensation floor. Rejects only when verification explicitly recorded the value as below floor.",
     appliesFrom: "verify",
     field: "verifiedValue",
     operator: "excludes_all",
@@ -386,7 +386,7 @@ export const DERIVED_CRITERIA: RuleInput[] = [
     key: "criteria.engagement.gig_marketplace",
     label: "Gig/marketplace listings go to Hold",
     description:
-      "From CONFIG › Employment type / Marketplace/gig listings, plus the owner's instruction to deprioritise AI-training/gig contractor work. Matching accounts are held, not rejected. Add accounts to the list as needed.",
+      "From your spreadsheet's rules — Employment type / Marketplace/gig listings, plus the owner's instruction to deprioritise AI-training/gig contractor work. Matching accounts are held, not rejected. Add accounts to the list as needed.",
     appliesFrom: "triage",
     field: "account",
     operator: "excludes_all",
@@ -550,7 +550,7 @@ export async function importWorkbook(ctx: Ctx, src: WorkbookSource, opts: { forc
       entityType: "import",
       entityId: batchId,
       event: "workbook_import",
-      reason: report.sheets.map((s) => `${s.sheet} ${s.imported}/${s.data}`).join(", "),
+      reason: `Uploaded ${report.file}: ` + report.sheets.map((s) => `${s.sheet} ${s.imported} of ${s.data} rows`).join(", "),
       detail: { file: report.file, sha256 },
     });
     if (!report.ok) throw new ImportCountMismatch(report);
@@ -609,7 +609,7 @@ async function importRecordRow(
           event: "import.state",
           priorStatus: created ? null : `${record.stage}/${record.status}`,
           newStatus: `${after.stage}/${after.status}`,
-          reason: `Imported from ${sheet} row ${r.rowNumber}`,
+          reason: `From your spreadsheet (${sheet} sheet, row ${r.rowNumber})`,
         });
       }
     }
@@ -660,7 +660,7 @@ async function importHistoryRow(c: Ctx, r: SheetRow, rowLog: RowLog, bump: (o: s
     event: `import.history.${block}`,
     priorStatus: v["Follow-up Status"] ?? null,
     newStatus: v["Final Status"] ?? v["Verified Status"] ?? null,
-    reason: v["Final Reason"] ?? v.Blocker ?? v["Next Action"] ?? `HISTORY row ${r.rowNumber}`,
+    reason: v["Final Reason"] ?? v.Blocker ?? v["Next Action"] ?? `From your spreadsheet (History sheet, row ${r.rowNumber})`,
     occurredAt: v["Reverified Date"] ?? v["Last Action Date"] ?? v["Last Verified"] ?? undefined,
     detail: { source: "HISTORY", row: r.rowNumber, section: r.section || null, snapshot: v },
   });

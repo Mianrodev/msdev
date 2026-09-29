@@ -122,6 +122,16 @@ export function startsWithTerm(value: string, term: string): boolean {
   return new RegExp(`^${esc}(?![\\p{L}\\p{N}])`, "iu").test(value.trim());
 }
 
+/** "verifiedLocationFit" → "Verified location fit" (for messages people read). */
+export function fieldLabel(field: string): string {
+  const w = field
+    .replace(/[_.]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .trim()
+    .toLowerCase();
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
 export function evaluateRule(rule: RuleLike, fields: FieldSource): RuleResult {
   const r = evaluateRuleRaw(rule, fields);
   if (r.outcome === "fail" && rule.effect === "hold") return { ...r, outcome: "hold" };
@@ -130,12 +140,13 @@ export function evaluateRule(rule: RuleLike, fields: FieldSource): RuleResult {
 
 function evaluateRuleRaw(rule: RuleLike, fields: FieldSource): RuleResult {
   const base = { key: rule.key, label: rule.label, field: rule.field };
+  const name = `"${fieldLabel(rule.field)}"`;
   if (!rule.enabled || rule.operator === "note" || !rule.field) {
-    return { ...base, outcome: "not_applicable", reason: "Not an evaluable criterion" };
+    return { ...base, outcome: "not_applicable", reason: "Not checked automatically" };
   }
   const raw = fields[rule.field];
   if (isUnknown(raw)) {
-    return { ...base, outcome: "unknown", reason: `${rule.field} is UNKNOWN — cannot decide, does not reject` };
+    return { ...base, outcome: "unknown", reason: `${name} is not known yet — this doesn't count against it` };
   }
   const shown = String(raw);
 
@@ -145,34 +156,34 @@ function evaluateRuleRaw(rule: RuleLike, fields: FieldSource): RuleResult {
       const actual = toNumber(raw);
       const limit = toNumber(rule.value);
       if (actual === null) {
-        return { ...base, outcome: "unknown", reason: `${rule.field} "${shown}" is not a number` };
+        return { ...base, outcome: "unknown", reason: `${name} ("${shown}") isn't a number, so it can't be checked` };
       }
       if (limit === null) {
-        return { ...base, outcome: "not_applicable", reason: "Rule threshold is not a number" };
+        return { ...base, outcome: "not_applicable", reason: "The rule's number is missing" };
       }
       const ok = rule.operator === "gte" ? actual >= limit : actual <= limit;
-      const word = rule.operator === "gte" ? "floor" : "ceiling";
+      const word = rule.operator === "gte" ? "minimum" : "maximum";
       return {
         ...base,
         outcome: ok ? "pass" : "fail",
         reason: ok
-          ? `${rule.field} ${actual} meets ${word} ${limit}`
-          : `${rule.field} ${actual} is ${rule.operator === "gte" ? "below" : "above"} ${word} ${limit}`,
+          ? `${name} is ${actual} — meets the ${word} of ${limit}`
+          : `${name} is ${actual} — ${rule.operator === "gte" ? "below the minimum" : "above the maximum"} of ${limit}`,
       };
     }
     case "includes_any": {
       const allowed = toList(rule.value);
       const hit = allowed.find((a) => containsTerm(shown, a));
       return hit
-        ? { ...base, outcome: "pass", reason: `${rule.field} "${shown}" matches "${hit}"` }
-        : { ...base, outcome: "fail", reason: `${rule.field} "${shown}" matches none of: ${allowed.join(", ")}` };
+        ? { ...base, outcome: "pass", reason: `${name} is "${shown}" — includes "${hit}"` }
+        : { ...base, outcome: "fail", reason: `${name} is "${shown}" — includes none of: ${allowed.join(", ")}` };
     }
     case "excludes_all": {
       const excluded = toList(rule.value);
       const hit = excluded.find((a) => containsTerm(shown, a));
       return hit
-        ? { ...base, outcome: "fail", reason: `${rule.field} "${shown}" contains excluded "${hit}"` }
-        : { ...base, outcome: "pass", reason: `${rule.field} contains no excluded terms` };
+        ? { ...base, outcome: "fail", reason: `${name} is "${shown}" — includes "${hit}"` }
+        : { ...base, outcome: "pass", reason: `${name} includes none of: ${excluded.join(", ")}` };
     }
     case "starts_with_any":
     case "not_starts_with_any": {
@@ -184,8 +195,8 @@ function evaluateRuleRaw(rule: RuleLike, fields: FieldSource): RuleResult {
         ...base,
         outcome: ok ? "pass" : "fail",
         reason: hit
-          ? `${rule.field} "${shown}" starts with "${hit}"`
-          : `${rule.field} "${shown}" starts with none of: ${terms.join(", ")}`,
+          ? `${name} is "${shown}" — starts with "${hit}"`
+          : `${name} is "${shown}" — doesn't start with ${terms.join(", ")}`,
       };
     }
     case "equals": {
@@ -194,11 +205,11 @@ function evaluateRuleRaw(rule: RuleLike, fields: FieldSource): RuleResult {
       return {
         ...base,
         outcome: ok ? "pass" : "fail",
-        reason: ok ? `${rule.field} is "${shown}"` : `${rule.field} is "${shown}", required "${rule.value}"`,
+        reason: ok ? `${name} is "${shown}"` : `${name} is "${shown}", not "${rule.value}"`,
       };
     }
     default:
-      return { ...base, outcome: "not_applicable", reason: "Unknown operator" };
+      return { ...base, outcome: "not_applicable", reason: "Not checked automatically" };
   }
 }
 
@@ -223,11 +234,11 @@ export function evaluate(rules: RuleLike[], fields: FieldSource, stage: Decision
 }
 
 export function summarize(ev: Evaluation): string {
-  if (ev.results.length === 0) return "No evaluable criteria";
+  if (ev.results.length === 0) return "no automatic checks apply";
   const parts: string[] = [];
-  if (ev.fails.length) parts.push(`Violates: ${ev.fails.map((f) => f.reason).join("; ")}`);
-  if (ev.holds.length) parts.push(`Needs review: ${ev.holds.map((f) => f.reason).join("; ")}`);
-  if (ev.unknowns.length) parts.push(`Unknown: ${ev.unknowns.map((f) => f.field).join(", ")}`);
-  parts.push(`${ev.passes.length}/${ev.results.length} criteria verified`);
-  return parts.join(". ");
+  if (ev.fails.length) parts.push(`fails: ${ev.fails.map((f) => f.reason).join("; ")}`);
+  if (ev.holds.length) parts.push(`needs a look: ${ev.holds.map((f) => f.reason).join("; ")}`);
+  if (ev.unknowns.length) parts.push(`not known yet: ${ev.unknowns.map((f) => fieldLabel(f.field)).join(", ")}`);
+  parts.push(`${ev.passes.length} of ${ev.results.length} checks passed`);
+  return parts.join("; ");
 }

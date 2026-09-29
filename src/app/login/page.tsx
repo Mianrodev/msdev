@@ -36,6 +36,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
       ) : (
         <>
           <h1>Sign in</h1>
+          <p className="intro">Type the password you created when you first opened the app.</p>
           <form action={loginAction} className="card stack">
             {error && <div className="flash error">{error}</div>}
             <input type="hidden" name="next" value={one(sp.next) ?? "/"} />

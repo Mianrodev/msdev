@@ -32,7 +32,7 @@ export async function setupAction(f: FormData) {
   const created = await createFirstPassword(await getDb(), pw);
   if (!created) redirect(`/login?error=${q("A password has already been set. Sign in with it.")}`);
   await startSession();
-  redirect("/import?ok=" + q("Password created — you're signed in. Next: upload your tracker workbook."));
+  redirect("/?ok=" + q("Password created — you're signed in. Follow the Getting started steps below."));
 }
 
 export async function loginAction(f: FormData) {

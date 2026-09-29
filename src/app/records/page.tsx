@@ -1,166 +1,198 @@
 import Link from "next/link";
-import { Flash, fmtDate, one, StageLabel, StatusBadge, Verdict, type SearchParams } from "@/components/ui";
-import { listRecords, SORT_KEYS, VIEWS, type SortKey, type View } from "@/services/records";
+import { fmtDay, LIST_TO_VIEW, LISTS, OUTREACH_NAMES, TIER_NAMES, type ListKey } from "@/components/plain";
+import { Empty, Ext, Flash, one, PageHeader, StatusBadge, type SearchParams } from "@/components/ui";
+import type { RecordRow } from "@/db/schema";
+import { countsByView, listRecords, type SortKey } from "@/services/records";
 import { getCtx } from "@/services/request";
-import { FIT_TIERS, STAGE_LABELS, STAGES, STATUSES } from "@/core/types";
 
 export const dynamic = "force-dynamic";
 
-const LIMIT = 500;
+const PAGE = 300;
+const LIST_ORDER: ListKey[] = ["ready", "checking", "hold", "archive", "all"];
+const VIEW_TO_LIST: Record<string, ListKey> = { prospects: "ready", leads: "checking", hold: "hold", archive: "archive", all: "all" };
 
-export default async function RecordsPage({ searchParams }: { searchParams: SearchParams }) {
+const SORTS: Record<string, { label: string; key: SortKey; dir: "asc" | "desc" }> = {
+  recent: { label: "Recently changed", key: "updated", dir: "desc" },
+  company: { label: "Company A–Z", key: "account", dir: "asc" },
+  found: { label: "Newest found", key: "found", dir: "desc" },
+  fit: { label: "Best fit first", key: "tier", dir: "asc" },
+};
+
+type Col = { head: string; cell: (r: RecordRow) => React.ReactNode; className?: string };
+
+const COLS: Record<ListKey, Col[]> = {
+  ready: [
+    { head: "Fit", cell: (r) => (r.fitTier ? TIER_NAMES[r.fitTier] : "—") },
+    { head: "Application", cell: (r) => OUTREACH_NAMES[r.outreachStatus] },
+    { head: "Link", cell: (r) => <Ext href={r.nextStepUrl ?? r.sourceUrl} label="Open" /> },
+  ],
+  checking: [
+    { head: "Where it is", cell: (r) => <StatusBadge r={r} /> },
+    { head: "Found", cell: (r) => fmtDay(r.dateFound) },
+  ],
+  hold: [
+    { head: "Why it's on hold", cell: (r) => r.holdReason ?? "—", className: "why" },
+    { head: "What's needed", cell: (r) => r.nextAction ?? "—", className: "why" },
+  ],
+  archive: [
+    { head: "Why it was archived", cell: (r) => r.archiveReason ?? "—", className: "why" },
+    { head: "Archived", cell: (r) => fmtDay(r.archivedAt) },
+  ],
+  all: [
+    { head: "Where it is", cell: (r) => <StatusBadge r={r} /> },
+    { head: "Found", cell: (r) => fmtDay(r.dateFound) },
+  ],
+};
+
+export default async function LeadsPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
-  const view = (one(sp.view) ?? "all") as View;
-  const f = {
-    view: view in VIEWS ? view : ("all" as View),
-    stage: one(sp.stage) || undefined,
-    status: one(sp.status) || undefined,
-    tier: one(sp.tier) || undefined,
-    q: one(sp.q) || undefined,
-    sort: (SORT_KEYS.includes(one(sp.sort) as SortKey) ? one(sp.sort) : "updated") as SortKey,
-    dir: (one(sp.dir) === "asc" ? "asc" : one(sp.dir) === "desc" ? "desc" : undefined) as "asc" | "desc" | undefined,
-  };
-  const rows = await listRecords((await getCtx()), { ...f, limit: LIMIT + 1 });
-  const shown = rows.slice(0, LIMIT);
+  const ctx = await getCtx();
+  const requested = one(sp.list) ?? VIEW_TO_LIST[one(sp.view) ?? ""] ?? "ready";
+  const list: ListKey = (LIST_ORDER as string[]).includes(requested) ? (requested as ListKey) : "ready";
+  const q = one(sp.q)?.trim() || undefined;
+  const sortName = one(sp.sort) && SORTS[one(sp.sort)!] ? one(sp.sort)! : list === "ready" ? "fit" : "recent";
+  const sort = SORTS[sortName];
+  const limit = Math.min(Number(one(sp.limit)) || PAGE, 5000);
 
-  const qs = (patch: Record<string, string | undefined>) => {
+  const [rows, counts] = await Promise.all([
+    listRecords(ctx, { view: LIST_TO_VIEW[list], q, sort: sort.key, dir: sort.dir, limit: limit + 1 }),
+    countsByView(ctx),
+  ]);
+  const shown = rows.slice(0, limit);
+  const countOf: Record<ListKey, number> = {
+    ready: counts.prospects,
+    checking: counts.leads,
+    hold: counts.hold,
+    archive: counts.archive,
+    all: counts.all,
+  };
+  const href = (patch: Record<string, string | undefined>) => {
     const p = new URLSearchParams();
-    const merged = { view: f.view, stage: f.stage, status: f.status, tier: f.tier, q: f.q, sort: f.sort, dir: f.dir, ...patch };
+    const merged = { list, q, sort: sortName, ...patch };
     for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
     return `/records?${p}`;
-  };
-  const sortLink = (key: SortKey, label: string) => {
-    const active = f.sort === key;
-    const nextDir = active && f.dir !== "desc" && (f.dir === "asc" || !["updated", "created"].includes(key)) ? "desc" : "asc";
-    return (
-      <Link href={qs({ sort: key, dir: nextDir })}>
-        {label}
-        {active ? (nextDir === "asc" ? " ↓" : " ↑") : ""}
-      </Link>
-    );
   };
 
   return (
     <>
       <Flash sp={sp} />
-      <div className="spread">
-        <h1>{VIEWS[f.view]}</h1>
-        <div className="row">
-          <a className="button" href={`/export/records?mode=shared&view=${f.view}`} title="Restricted fields dropped; identity terms, emails and phones redacted">
-            Export CSV (shared)
-          </a>
-          <a className="button" href={`/export/records?mode=internal&view=${f.view}`} title="Everything — for your own backups only">
-            Export CSV (internal)
-          </a>
-          <Link className="button primary" href="/records/new">
-            New lead
-          </Link>
-        </div>
-      </div>
+      <PageHeader title="Leads" intro="Every lead is on one of four lists. Click a list, then click a lead to open it.">
+        <Link className="button primary" href="/records/new">
+          + Add a lead
+        </Link>
+      </PageHeader>
 
-      <div className="tabs">
-        {(Object.keys(VIEWS) as View[]).map((v) => (
-          <Link key={v} href={`/records?view=${v}`} className={v === f.view ? "on" : ""}>
-            {VIEWS[v]}
+      <nav className="tabs" aria-label="Lists">
+        {LIST_ORDER.map((l) => (
+          <Link key={l} href={`/records?list=${l}`} className={l === list ? "on" : ""} aria-current={l === list ? "page" : undefined}>
+            {LISTS[l].title} ({countOf[l]})
           </Link>
         ))}
-      </div>
+      </nav>
+      <p className="muted" style={{ marginTop: 0 }}>
+        {LISTS[list].help}
+      </p>
 
-      <form className="inline" method="get" action="/records" style={{ marginBottom: ".75rem" }}>
-        <input type="hidden" name="view" value={f.view} />
-        <label>
+      <form className="inline" method="get" action="/records" style={{ margin: ".6rem 0 .9rem" }}>
+        <input type="hidden" name="list" value={list} />
+        <label style={{ flex: "1 1 260px" }}>
           Search
-          <input name="q" defaultValue={f.q} placeholder="account, opportunity, location, notes" />
+          <input name="q" defaultValue={q} placeholder="Company, opportunity, location or notes" />
         </label>
         <label>
-          Stage reached
-          <select name="stage" defaultValue={f.stage ?? ""}>
-            <option value="">Any</option>
-            {STAGES.map((s) => (
-              <option key={s} value={s}>
-                {STAGE_LABELS[s]}
+          Order
+          <select name="sort" defaultValue={sortName}>
+            {Object.entries(SORTS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.label}
               </option>
             ))}
           </select>
         </label>
-        <label>
-          Status
-          <select name="status" defaultValue={f.status ?? ""}>
-            <option value="">Any</option>
-            {STATUSES.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Tier
-          <select name="tier" defaultValue={f.tier ?? ""}>
-            <option value="">Any</option>
-            {FIT_TIERS.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </label>
-        <input type="hidden" name="sort" value={f.sort} />
-        {f.dir && <input type="hidden" name="dir" value={f.dir} />}
-        <button type="submit">Filter</button>
-        <Link href={`/records?view=${f.view}`} className="small">
-          Clear
-        </Link>
+        <button type="submit">Show</button>
+        {q && (
+          <Link href={href({ q: undefined })} className="small">
+            Clear search
+          </Link>
+        )}
       </form>
 
-      <p className="muted small">
-        {rows.length > LIMIT ? `Showing first ${LIMIT} — narrow the filter to see more.` : `${shown.length} records`}
-      </p>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>{sortLink("account", "Account")}</th>
-              <th>{sortLink("opportunity", "Opportunity")}</th>
-              <th>{sortLink("stage", "Stage")}</th>
-              <th>{sortLink("status", "Status")}</th>
-              <th>{sortLink("tier", "Tier")}</th>
-              <th>Latest verdict</th>
-              <th>Source</th>
-              <th>{sortLink("found", "Found")}</th>
-              <th>{sortLink("updated", "Updated")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((r) => (
-              <tr key={r.id}>
-                <td className="clip">
-                  <Link href={`/records/${r.id}`}>{r.account}</Link>
-                </td>
-                <td className="wrap">
-                  <Link href={`/records/${r.id}`}>{r.opportunity}</Link>
-                </td>
-                <td>
-                  <StageLabel stage={r.stage} />
-                </td>
-                <td>
-                  <StatusBadge status={r.status} />
-                </td>
-                <td>{r.fitTier ?? <span className="muted">—</span>}</td>
-                <td className="small">
-                  <Verdict v={r.verifyVerdict ?? r.triageVerdict ?? r.screenVerdict} />
-                </td>
-                <td className="small">{r.sourceBoard ?? <span className="muted">—</span>}</td>
-                <td className="small">{r.dateFound ?? "—"}</td>
-                <td className="small muted">{fmtDate(r.updatedAt)}</td>
-              </tr>
-            ))}
-            {shown.length === 0 && (
-              <tr>
-                <td colSpan={9} className="muted">
-                  Nothing here.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {shown.length === 0 ? (
+        <Empty title={q ? `Nothing on this list matches "${q}".` : `Nothing on the ${LISTS[list].title} list right now.`}>
+          {list === "ready" && !q && (
+            <p className="muted">
+              Leads land here after they pass every check. Run the <Link href="/#weekly">weekly check</Link> to move leads along.
+            </p>
+          )}
+        </Empty>
+      ) : (
+        <>
+          <p className="small muted">
+            {rows.length > limit ? `Showing the first ${limit}.` : `${shown.length} ${shown.length === 1 ? "lead" : "leads"}.`}
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Opportunity</th>
+                  {COLS[list].map((c) => (
+                    <th key={c.head}>{c.head}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <Link href={`/records/${r.id}`}>
+                        <strong>{r.account}</strong>
+                      </Link>
+                    </td>
+                    <td className="wrap">
+                      <Link href={`/records/${r.id}`}>{r.opportunity}</Link>
+                      {r.location && <div className="muted small">{r.location}</div>}
+                    </td>
+                    {COLS[list].map((c) => (
+                      <td key={c.head} className={c.className}>
+                        {c.cell(r)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {rows.length > limit && (
+            <p style={{ textAlign: "center" }}>
+              <Link className="button" href={href({ limit: String(limit + PAGE) })}>
+                Show more
+              </Link>
+            </p>
+          )}
+        </>
+      )}
+
+      <details className="card" style={{ marginTop: "1.5rem" }}>
+        <summary>Download this list</summary>
+        <div className="grid cols-2">
+          <div>
+            <a className="button primary" href={`/export/records?mode=shared&view=${LIST_TO_VIEW[list]}`}>
+              Download shared copy
+            </a>
+            <p className="small muted">
+              Safe to send to someone. Personal details, prepared briefs and answers, notes and contacts are removed.
+            </p>
+          </div>
+          <div>
+            <a className="button" href={`/export/records?mode=internal&view=${LIST_TO_VIEW[list]}`}>
+              Download full backup
+            </a>
+            <p className="small muted">Everything, for your own safekeeping. Don&apos;t send this one to anyone.</p>
+          </div>
+        </div>
+        <p className="small muted">Files open in Excel or Google Sheets.</p>
+      </details>
     </>
   );
 }

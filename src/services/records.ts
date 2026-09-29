@@ -179,8 +179,8 @@ export async function upsertLead(ctx: Ctx, input: RecordInput, origin = "manual"
       priorStatus: existing.status,
       newStatus: existing.status,
       reason: changed.length
-        ? `Repeat of existing record; updated in place: ${changed.join(", ")}`
-        : "Repeat of existing record; no new information",
+        ? `Added again — updated this lead instead of making a copy (${changed.length} ${changed.length === 1 ? "detail" : "details"} changed)`
+        : "Added again — nothing new, so nothing changed",
       detail: { origin, changed },
     });
     return { record: await getRecord(ctx, existing.id), created: false, changed };
@@ -205,7 +205,7 @@ export async function upsertLead(ctx: Ctx, input: RecordInput, origin = "manual"
     entityId: id,
     event: "created",
     newStatus: "active",
-    reason: `Discovered (${origin})`,
+    reason: origin.startsWith("import:") ? `Added from your spreadsheet (${origin.slice(7)} sheet)` : "Added by you",
   });
   return { record: await getRecord(ctx, id), created: true, changed: [] };
 }
@@ -255,7 +255,7 @@ export async function updateRecord(ctx: Ctx, id: string, input: RecordInput, rea
     event: "updated",
     priorStatus: existing.status,
     newStatus: existing.status,
-    reason: reason || `Edited: ${changed.join(", ")}`,
+    reason: reason || `Edited ${changed.length} ${changed.length === 1 ? "detail" : "details"}`,
     detail: { changed },
   });
   return await getRecord(ctx, id);
@@ -395,7 +395,7 @@ export async function setSourceVerification(ctx: Ctx, id: string, value: SourceV
     event: "source_verification",
     priorStatus: r.sourceVerification,
     newStatus: value,
-    reason: reason.trim() || `Source marked ${value}`,
+    reason: reason.trim() || "Link status updated",
   });
   return await getRecord(ctx, id);
 }
@@ -435,7 +435,7 @@ export async function setOutreachStatus(
     event: "outreach",
     priorStatus: r.outreachStatus,
     newStatus: to,
-    reason: opts.reason?.trim() || `Outreach status → ${to}`,
+    reason: opts.reason?.trim() || "Application status updated",
     detail: { humanConfirmed: opts.humanConfirmed },
   });
   return await getRecord(ctx, id);
@@ -460,7 +460,8 @@ const SORTABLE = {
   opportunity: records.opportunity,
   stage: records.stage,
   status: records.status,
-  tier: records.fitTier,
+  // Rank, not alphabet: exceptional → strong → good → stretch → unrated.
+  tier: sql`case ${records.fitTier} when 'exceptional' then 0 when 'strong' then 1 when 'good' then 2 when 'stretch' then 3 else 4 end`,
 } as const;
 export type SortKey = keyof typeof SORTABLE;
 export const SORT_KEYS = Object.keys(SORTABLE) as SortKey[];
@@ -532,4 +533,13 @@ export async function countsByStage(ctx: Ctx) {
     .where(eq(records.workspaceId, ctx.workspaceId))
     .groupBy(records.stage, records.status)
     ;
+}
+
+/** Every detail name a rule could look at: built-in fields plus the attribute names leads actually have. */
+export async function listFieldNames(ctx: Ctx): Promise<string[]> {
+  const rows = await ctx.db
+    .selectDistinct({ k: sql<string>`jsonb_object_keys(${records.attributes})` })
+    .from(records)
+    .where(eq(records.workspaceId, ctx.workspaceId));
+  return [...new Set(["location", "account", "opportunity", "sourceBoard", ...rows.map((r) => r.k)])].sort();
 }

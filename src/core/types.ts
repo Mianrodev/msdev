@@ -51,21 +51,28 @@ export type DecisionStage = keyof typeof VERDICTS;
 export type Verdict<S extends DecisionStage = DecisionStage> = (typeof VERDICTS)[S][number];
 
 export const VERDICT_LABELS: Record<string, string> = {
-  reject: "Reject",
-  keep_possible: "Keep – possible",
-  keep_stretch: "Keep – stretch",
-  keep_strong: "Keep – strong",
+  reject: "Not a fit",
+  keep_possible: "Keep — possible",
+  keep_stretch: "Keep — a stretch",
+  keep_strong: "Keep — strong",
   top_priority: "Top priority",
-  secondary: "Secondary",
-  hold_low_confidence: "Hold – low confidence",
+  secondary: "Worth a look",
+  hold_low_confidence: "Not sure yet — hold",
   remove: "Remove",
-  tier_exceptional: "Exceptional",
-  tier_strong: "Strong",
-  tier_good: "Good",
-  tier_stretch: "Stretch",
-  hold_needs_info: "Hold – needs information",
-  archive: "Archive",
-  closed: "Closed",
+  tier_exceptional: "Ready — exceptional fit",
+  tier_strong: "Ready — strong fit",
+  tier_good: "Ready — good fit",
+  tier_stretch: "Ready — stretch",
+  hold_needs_info: "Needs more information — hold",
+  archive: "Not a fit — archive",
+  closed: "No longer open — archive",
+};
+
+/** Plain names for the decision steps, used in messages. */
+export const STEP_WORDS: Record<string, string> = {
+  screen: "First look",
+  triage: "Deeper look",
+  verify: "Final check",
 };
 
 export const FIT_TIERS = ["exceptional", "strong", "good", "stretch"] as const;

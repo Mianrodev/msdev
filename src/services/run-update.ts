@@ -88,12 +88,12 @@ export async function runUpdate(ctx: Ctx): Promise<RunSummary> {
         const verdict = suggestVerdict(stage, evaluation, r.sourceVerification)!;
         const why =
           stage === "verify" && verdict === "hold_needs_info" && r.sourceVerification !== "verified" && !evaluation.holds.length
-            ? `Source is ${r.sourceVerification} — needs live verification`
+            ? `the listing ${r.sourceVerification === "unreachable" ? "couldn't be reached" : "hasn't been checked yet"} — check the link is still open`
             : summarize(evaluation);
         const after = await decideStage(sys, r.id, {
           stage,
           verdict,
-          reason: `Run update: ${VERDICT_LABELS[verdict]} — ${why}`,
+          reason: `Weekly check: ${VERDICT_LABELS[verdict]} — ${why}`,
         });
         const effect = verdictEffect(verdict);
         if (effect === "advance") counts.advanced++;
@@ -150,22 +150,15 @@ export async function runUpdate(ctx: Ctx): Promise<RunSummary> {
 
 /** The brief, neutral summary — counts only, no narrative. */
 export function formatSummary(s: RunSummary): string {
-  const st = (k: DecisionStage, label: string) => {
-    const c = s.stages[k];
-    return `${label} ${c.in} in → ${c.advanced} on, ${c.held} hold, ${c.archived} archive`;
-  };
-  const tiers = Object.entries(s.activeProspectsByTier)
-    .map(([k, v]) => `${k} ${v}`)
-    .join(", ");
+  const st = s.stages;
+  const processed = st.screen.in + (st.triage.in - st.screen.advanced) + (st.verify.in - st.triage.advanced);
+  const ready = Object.values(s.activeProspectsByTier).reduce((x, y) => x + y, 0);
   return [
-    `Intake ${s.intake}`,
-    `Reconciled ${s.reconciliation.prospectsChecked} prospects + ${s.reconciliation.heldChecked} held`,
-    st("screen", "Screen"),
-    st("triage", "Triage"),
-    st("verify", "Verify"),
-    `Moved to Hold ${s.movedToHold}, to Archive ${s.movedToArchive}`,
-    `Active prospects: ${tiers || "none"}`,
-  ].join(". ");
+    `Re-checked ${s.reconciliation.prospectsChecked} Ready and ${s.reconciliation.heldChecked} On-hold leads`,
+    `moved ${processed} waiting leads through the checks (${st.verify.advanced} became Ready)`,
+    `${s.movedToHold} moved to On hold, ${s.movedToArchive} moved to Archived`,
+    `${ready} Ready now`,
+  ].join("; ") + ".";
 }
 
 export async function listRuns(ctx: Ctx, limit = 20) {

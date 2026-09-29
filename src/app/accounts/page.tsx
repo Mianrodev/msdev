@@ -1,95 +1,91 @@
 import Link from "next/link";
-import { Ext, Flash, one, StatusBadge, type SearchParams } from "@/components/ui";
+import { Empty, Ext, Flash, one, PageHeader, type SearchParams } from "@/components/ui";
 import { listAccounts } from "@/services/accounts";
 import { getCtx } from "@/services/request";
-import { TARGET_ACCOUNT_STATUSES } from "@/core/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function AccountsPage({ searchParams }: { searchParams: SearchParams }) {
+const LIST_NAMES: Record<string, string> = { outreach: "Ready to approach", watchlist: "Watching" };
+const STATUS_NAMES: Record<string, string> = { tracking: "Active", hold: "On hold", archived: "Archived" };
+
+export default async function CompaniesPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
-  const status = one(sp.status) || undefined;
-  const list = one(sp.list) || undefined;
-  const q = one(sp.q) || undefined;
-  const rows = (await listAccounts(await getCtx(), { status, q })).filter((a) => !list || a.attributes.list === list);
+  const ctx = await getCtx();
+  const show = one(sp.show) ?? "active";
+  const q = one(sp.q)?.trim() || undefined;
+  const all = await listAccounts(ctx, { q });
+  const rows = all.filter((a) => (show === "active" ? a.status !== "archived" : show === "archived" ? a.status === "archived" : true));
   return (
     <>
       <Flash sp={sp} />
-      <div className="spread">
-        <h1>Target accounts</h1>
-        <div className="row">
-          <a className="button" href="/export/accounts?mode=shared">
-            Export CSV (shared)
-          </a>
-          <Link className="button primary" href="/accounts/new">
-            New target account
+      <PageHeader
+        title="Companies"
+        intro="Companies worth approaching even when they don't have a specific opening. Keep notes and a prepared message for each."
+      >
+        <Link className="button primary" href="/accounts/new">
+          + Add a company
+        </Link>
+      </PageHeader>
+      <nav className="tabs">
+        {[
+          ["active", "Active"],
+          ["archived", "Archived"],
+          ["all", "All"],
+        ].map(([k, label]) => (
+          <Link key={k} href={`/accounts?show=${k}`} className={show === k ? "on" : ""}>
+            {label}
           </Link>
-        </div>
-      </div>
-      <p className="muted small">Accounts worth tracking for outreach even without a specific open opportunity.</p>
-      <form className="inline" method="get" style={{ marginBottom: ".75rem" }}>
-        <label>
+        ))}
+      </nav>
+      <form className="inline" method="get" style={{ margin: ".6rem 0 .9rem" }}>
+        <input type="hidden" name="show" value={show} />
+        <label style={{ flex: "1 1 260px" }}>
           Search
-          <input name="q" defaultValue={q} />
+          <input name="q" defaultValue={q} placeholder="Company name or what they do" />
         </label>
-        <label>
-          Status
-          <select name="status" defaultValue={status ?? ""}>
-            <option value="">Any</option>
-            {TARGET_ACCOUNT_STATUSES.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          List
-          <select name="list" defaultValue={list ?? ""}>
-            <option value="">Any</option>
-            <option value="outreach">outreach</option>
-            <option value="watchlist">watchlist</option>
-          </select>
-        </label>
-        <button type="submit">Filter</button>
+        <button type="submit">Show</button>
       </form>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Account</th>
-              <th>Fit</th>
-              <th>List</th>
-              <th>Status</th>
-              <th>What they do</th>
-              <th>Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((a) => (
-              <tr key={a.id}>
-                <td>
-                  <Link href={`/accounts/${a.id}`}>{a.name}</Link>
-                </td>
-                <td className="small">{a.fit ?? "—"}</td>
-                <td className="small">{String(a.attributes.list ?? "—")}</td>
-                <td>
-                  <StatusBadge status={a.status} />
-                </td>
-                <td className="small wrap">{a.description?.slice(0, 160) ?? "—"}</td>
-                <td className="small">
-                  <Ext href={a.website ?? a.sourceUrl} />
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
+      {rows.length === 0 ? (
+        <Empty title={q ? `No companies match "${q}".` : "No companies here yet."}>
+          <p className="muted">
+            <Link href="/accounts/new">Add a company</Link> or <Link href="/import">upload your spreadsheet</Link>.
+          </p>
+        </Empty>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
               <tr>
-                <td colSpan={6} className="muted">
-                  Nothing here.
-                </td>
+                <th>Company</th>
+                <th>List</th>
+                <th>What they do</th>
+                <th>Website</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((a) => (
+                <tr key={a.id}>
+                  <td>
+                    <Link href={`/accounts/${a.id}`}>
+                      <strong>{a.name}</strong>
+                    </Link>
+                    {a.status !== "tracking" && <div className="muted small">{STATUS_NAMES[a.status]}</div>}
+                  </td>
+                  <td className="small">{LIST_NAMES[String(a.attributes.list)] ?? "—"}</td>
+                  <td className="why">{a.description ? a.description.slice(0, 180) + (a.description.length > 180 ? "…" : "") : "—"}</td>
+                  <td className="small">
+                    <Ext href={a.website ?? a.sourceUrl} label="Open" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="small muted" style={{ marginTop: "1rem" }}>
+        Need a copy to share? <a href="/export/accounts?mode=shared">Download shared copy</a> (contacts and prepared messages
+        removed).
+      </p>
     </>
   );
 }

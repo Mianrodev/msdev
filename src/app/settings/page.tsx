@@ -1,141 +1,133 @@
 import Link from "next/link";
-import { createRuleAction, identityTermsAction, toggleRuleAction } from "../actions";
+import { createRuleAction, toggleRuleAction } from "../actions";
 import { changePasswordAction } from "../login/actions";
+import { SubmitButton } from "@/components/client";
+import { ruleSentence, RuleFields, STEP_FROM } from "@/components/rule-form";
+import { Flash, PageHeader, type SearchParams } from "@/components/ui";
 import { MIN_PASSWORD_LENGTH, passwordManagedByHost } from "@/lib/auth";
-import { RuleFields } from "@/components/rule-form";
-import { Flash, type SearchParams } from "@/components/ui";
-import { getIdentityTerms, listRules } from "@/services/rules";
+import { listFieldNames } from "@/services/records";
 import { getCtx } from "@/services/request";
-import { OPERATOR_LABELS } from "@/core/rules";
-import type { RuleRow } from "@/db/schema";
+import { listRules } from "@/services/rules";
 
 export const dynamic = "force-dynamic";
 
-function RuleTable({ rules, evaluable }: { rules: RuleRow[]; evaluable: boolean }) {
-  return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Rule</th>
-            <th>From</th>
-            {evaluable && <th>Criterion</th>}
-            {evaluable && <th>On violation</th>}
-            <th>Enabled</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rules.map((r) => (
-            <tr key={r.id}>
-              <td className="wrap">
-                <Link href={`/settings/rules/${r.id}`}>{r.label}</Link>
-                <div className="muted small">{evaluable ? r.description : r.description.slice(0, 220) + (r.description.length > 220 ? "…" : "")}</div>
-                <div className="mono muted">{r.key}</div>
-              </td>
-              <td className="small">{r.appliesFrom}</td>
-              {evaluable && (
-                <td className="small">
-                  <span className="mono">{r.field}</span> {OPERATOR_LABELS[r.operator]}{" "}
-                  <strong>{Array.isArray(r.value) ? (r.value as string[]).join(", ") : String(r.value)}</strong>
-                </td>
-              )}
-              {evaluable && <td className="small">{r.effect === "hold" ? "Hold" : "Archive"}</td>}
-              <td>
-                <form action={toggleRuleAction.bind(null, r.id, !r.enabled)}>
-                  <button type="submit" className="small">
-                    {r.enabled ? "On — disable" : "Off — enable"}
-                  </button>
-                </form>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-export default async function SettingsPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function RulesPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
-  const ctx = (await getCtx());
-  const rules = await listRules(ctx);
-  const criteria = rules.filter((r) => r.operator !== "note");
+  const ctx = await getCtx();
+  const [rules, fieldNames] = await Promise.all([listRules(ctx), listFieldNames(ctx)]);
+  const checks = rules.filter((r) => r.operator !== "note");
   const notes = rules.filter((r) => r.operator === "note");
-  const terms = await getIdentityTerms(ctx);
   return (
     <>
       <Flash sp={sp} />
-      <h1>Rules &amp; settings</h1>
-      <p className="muted">
-        The criteria each stage applies. Rules are data: edit them here, and the next <strong>Run update</strong> (or
-        reconciliation) applies the change to every record — including existing prospects. Rules are never deleted, only
-        disabled, so past verdicts stay explainable.
-      </p>
+      <PageHeader
+        title="Rules"
+        intro="The automatic checks the weekly check uses to sort your leads. Change them any time — the next weekly check applies the new rules to every lead, including ones already Ready."
+      />
 
-      <h2>Evaluable criteria ({criteria.length})</h2>
-      <p className="muted small">
-        An UNKNOWN value never fails a criterion. &quot;Reject&quot; violations send a record to Archive; &quot;Hold&quot;
-        violations park it in Hold for a human.
-      </p>
-      <RuleTable rules={criteria} evaluable />
+      <h2>Automatic checks ({checks.filter((c) => c.enabled).length} switched on)</h2>
+      <div className="help" style={{ marginBottom: ".8rem" }}>
+        <strong>How checks work:</strong> a lead that fails a check is archived (or put on hold, if the check says so). A lead
+        whose detail is <em>unknown</em> is never failed for it.
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Check</th>
+              <th>When</th>
+              <th>On / off</th>
+            </tr>
+          </thead>
+          <tbody>
+            {checks.map((r) => (
+              <tr key={r.id}>
+                <td className="wrap">
+                  <Link href={`/settings/rules/${r.id}`}>
+                    <strong>{r.label}</strong>
+                  </Link>
+                  <div className="small">{ruleSentence(r)}</div>
+                </td>
+                <td className="small">{STEP_FROM[r.appliesFrom]}</td>
+                <td>
+                  <form action={toggleRuleAction.bind(null, r.id, !r.enabled)}>
+                    <SubmitButton className={r.enabled ? "small" : "small"} pending="…">
+                      {r.enabled ? "✓ On — switch off" : "Off — switch on"}
+                    </SubmitButton>
+                  </form>
+                </td>
+              </tr>
+            ))}
+            {checks.length === 0 && (
+              <tr>
+                <td colSpan={3} className="muted">
+                  No automatic checks yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
-      <details style={{ marginTop: "1rem" }}>
-        <summary>Add a criterion</summary>
-        <form action={createRuleAction} className="card stack" style={{ marginTop: ".5rem" }}>
-          <RuleFields />
+      <details className="card" style={{ marginTop: "1rem" }}>
+        <summary>+ Add a new check</summary>
+        <form action={createRuleAction} className="stack">
+          <RuleFields fieldNames={fieldNames} />
           <div>
-            <button type="submit" className="primary">
-              Add rule
-            </button>
+            <SubmitButton pending="Saving…">Add check</SubmitButton>
           </div>
         </form>
       </details>
 
-      <h2>Process rules &amp; notes ({notes.length})</h2>
-      <p className="muted small">Standing rules, stage definitions and exclusions imported from the workbook&apos;s CONFIG sheet. Humans apply these when deciding; the code-enforced ones say so.</p>
-      <RuleTable rules={notes} evaluable={false} />
-
-      <h2>Redaction: identity terms</h2>
-      <p className="muted small">
-        Terms that must never appear in shared exports (owner name, personal email/phone, profile URL, home city, current
-        employer). Stored only in the local database. {terms.length} term(s) configured. You can also load them from a local
-        file — see README.
+      <h2>Your process notes ({notes.length})</h2>
+      <p className="muted">
+        The written rules from your old spreadsheet (and a few built in). They describe how you work; the ones the app enforces
+        say so.
       </p>
-      <details>
-        <summary>Edit identity terms</summary>
-        <form action={identityTermsAction} className="stack" style={{ marginTop: ".5rem" }}>
-          <textarea name="terms" rows={6} defaultValue={terms.join("\n")} placeholder="One per line" />
-          <div>
-            <button type="submit">Save terms</button>
-          </div>
-        </form>
+      <details className="card">
+        <summary>Show all notes</summary>
+        <ul className="plain">
+          {notes.map((r) => (
+            <li key={r.id}>
+              <Link href={`/settings/rules/${r.id}`}>
+                <strong>{r.label}</strong>
+              </Link>
+              <div className="muted small" style={{ whiteSpace: "pre-wrap" }}>
+                {r.description}
+              </div>
+            </li>
+          ))}
+        </ul>
       </details>
 
       <h2>Your password</h2>
       {passwordManagedByHost() ? (
-        <p className="muted small">Your password is set in the hosting settings (APP_PASSWORD).</p>
+        <p className="muted">Your password is set in the hosting settings.</p>
       ) : (
-        <details>
+        <details className="card">
           <summary>Change password</summary>
-          <form action={changePasswordAction} className="stack" style={{ marginTop: ".5rem", maxWidth: 420 }}>
+          <form action={changePasswordAction} className="stack" style={{ maxWidth: 440 }}>
             <label>
               Current password
               <input type="password" name="current" required autoComplete="current-password" />
             </label>
             <label>
-              New password (at least {MIN_PASSWORD_LENGTH} characters)
+              New password <span className="hint">(at least {MIN_PASSWORD_LENGTH} characters)</span>
               <input type="password" name="password" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
             </label>
             <label>
-              Type it again
+              Type the new password again
               <input type="password" name="confirm" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
             </label>
             <div>
-              <button type="submit">Change password</button>
+              <SubmitButton pending="Saving…">Change password</SubmitButton>
             </div>
           </form>
         </details>
       )}
+      <p className="small muted" style={{ marginTop: "1.2rem" }}>
+        Looking for the personal-details protection? It&apos;s on the <Link href="/privacy">Privacy</Link> page.
+      </p>
     </>
   );
 }

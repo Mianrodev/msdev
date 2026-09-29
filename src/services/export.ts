@@ -14,10 +14,10 @@ function csvCell(v: unknown): string {
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
-export function toCsv(rows: Record<string, unknown>[]): string {
+export function toCsv(rows: Record<string, unknown>[], header: (col: string) => string = (c) => c): string {
   if (!rows.length) return "";
   const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))];
-  return [cols.join(","), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(","))].join("\r\n") + "\r\n";
+  return [cols.map((c) => csvCell(header(c))).join(","), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(","))].join("\r\n") + "\r\n";
 }
 
 /**
@@ -35,7 +35,7 @@ export async function exportRecords(ctx: Ctx, mode: ExportMode, filter: ListFilt
   await logHistory(ctx, {
     entityType: "record",
     event: `export.${mode}`,
-    reason: `Exported ${rows.length} records (${mode})`,
+    reason: `Downloaded ${rows.length} leads (${mode === "shared" ? "shared copy" : "full backup"})`,
     detail: { filter: { ...filter } },
   });
   return rows;
@@ -51,7 +51,7 @@ export async function exportAccounts(ctx: Ctx, mode: ExportMode) {
   await logHistory(ctx, {
     entityType: "target_account",
     event: `export.${mode}`,
-    reason: `Exported ${rows.length} target accounts (${mode})`,
+    reason: `Downloaded ${rows.length} companies (${mode === "shared" ? "shared copy" : "full backup"})`,
   });
   return rows;
 }

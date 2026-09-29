@@ -39,7 +39,7 @@ export async function createRule(ctx: Ctx, input: RuleInput, origin = "manual"):
     entityId: id,
     event: "created",
     newStatus: data.enabled ? "enabled" : "disabled",
-    reason: `Rule ${data.key} created`,
+    reason: `Rule added: ${data.label}`,
     detail: { rule: data },
   });
   return (await getRule(ctx, id))!;
@@ -60,7 +60,7 @@ export async function updateRule(ctx: Ctx, id: string, input: RuleInput, reason:
     event: "updated",
     priorStatus: before.enabled ? "enabled" : "disabled",
     newStatus: data.enabled ? "enabled" : "disabled",
-    reason: reason.trim() || `Rule ${data.key} edited`,
+    reason: reason.trim() || `Rule edited: ${data.label}`,
     detail: {
       before: { ...before, createdAt: undefined, updatedAt: undefined },
       after: data,
@@ -120,12 +120,12 @@ export async function setSetting(ctx: Ctx, key: string, value: unknown, reason =
     await ctx.db.insert(settings).values({ workspaceId: ctx.workspaceId, key, value });
   }
   // Identity terms are themselves sensitive: log that they changed, not their values.
-  const sensitive = key === IDENTITY_TERMS_KEY;
+  const sensitive = key === IDENTITY_TERMS_KEY || key.startsWith("privacy.") || key.startsWith("auth.");
   await logHistory(ctx, {
     entityType: "setting",
     entityId: key,
     event: existing ? "updated" : "created",
-    reason: reason || `Setting ${key} saved`,
+    reason: reason || "Settings saved",
     detail: sensitive ? { count: Array.isArray(value) ? value.length : null } : { value },
   });
 }
@@ -146,7 +146,7 @@ export const DEFAULT_RULES: RuleInput[] = [
   {
     key: "process.no_fabrication",
     label: "Never fabricate data",
-    description: "A fact that isn't known is stored as UNKNOWN — never guessed. Enforced in core/rules.ts.",
+    description: "If something isn't known, leave it empty or write \"unknown\" — never guess. The app does this for you when it brings data in.",
     appliesFrom: "screen",
     field: "",
     operator: "note",
@@ -155,9 +155,9 @@ export const DEFAULT_RULES: RuleInput[] = [
   },
   {
     key: "process.unknown_not_reject",
-    label: "Unknown doesn't auto-reject",
+    label: "Unknown never counts against a lead",
     description:
-      "A record can advance with an UNKNOWN criterion if every other criterion is verified; only a genuine violation rejects. Enforced in core/pipeline.ts.",
+      "A lead is never rejected just because something isn't known. Only a real mismatch (like the wrong location) archives it. The app enforces this automatically.",
     appliesFrom: "screen",
     field: "",
     operator: "note",
@@ -166,8 +166,8 @@ export const DEFAULT_RULES: RuleInput[] = [
   },
   {
     key: "process.unverifiable_to_hold",
-    label: "Unverifiable sources go to Hold",
-    description: "A source that can't be reached or confirmed goes to Hold — not Reject, not promoted.",
+    label: "Unchecked links go On hold",
+    description: "If a listing can't be reached or confirmed, the lead goes On hold — it isn't rejected, and it can't become Ready. The app enforces this automatically.",
     appliesFrom: "verify",
     field: "",
     operator: "note",
@@ -176,8 +176,8 @@ export const DEFAULT_RULES: RuleInput[] = [
   },
   {
     key: "process.research_only",
-    label: "Research and prepare only",
-    description: "The tool never submits or contacts. A human approves and sends manually. Enforced in core/permissions.ts.",
+    label: "The app never sends anything",
+    description: "The app never applies, sends or contacts anyone. You do that yourself, then mark it in the app. This is built in and can't be switched off.",
     appliesFrom: "verify",
     field: "",
     operator: "note",
@@ -186,8 +186,8 @@ export const DEFAULT_RULES: RuleInput[] = [
   },
   {
     key: "example.value_floor",
-    label: "Example: minimum value",
-    description: "Example criterion — edit the threshold and enable it. Evaluates the record's `value` attribute.",
+    label: "Example: minimum pay",
+    description: "An example check (switched off). Edit the number and switch it on to archive leads whose \"value\" is below it.",
     appliesFrom: "screen",
     field: "value",
     operator: "gte",
@@ -196,8 +196,8 @@ export const DEFAULT_RULES: RuleInput[] = [
   },
   {
     key: "example.location",
-    label: "Example: acceptable locations",
-    description: "Example criterion — list acceptable location terms and enable it.",
+    label: "Example: location must include…",
+    description: "An example check (switched off). List the locations you accept, then switch it on.",
     appliesFrom: "screen",
     field: "location",
     operator: "includes_any",

@@ -1,19 +1,19 @@
 import { createAccountAction } from "../../actions";
 import { AccountFields } from "@/components/account-fields";
-import { Flash, type SearchParams } from "@/components/ui";
+import { SubmitButton } from "@/components/client";
+import { BackLink, Flash, PageHeader, type SearchParams } from "@/components/ui";
 
-export default async function NewAccount({ searchParams }: { searchParams: SearchParams }) {
+export default async function NewCompany({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
   return (
     <>
       <Flash sp={sp} />
-      <h1>New target account</h1>
+      <BackLink href="/accounts">Back to Companies</BackLink>
+      <PageHeader title="Add a company" intro="Only the name is required. If you already have this company, it's updated instead of added twice." />
       <form action={createAccountAction} className="card stack">
         <AccountFields />
         <div>
-          <button type="submit" className="primary">
-            Save
-          </button>
+          <SubmitButton pending="Saving…">Add company</SubmitButton>
         </div>
       </form>
     </>
