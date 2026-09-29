@@ -1,0 +1,10 @@
+{
+  "_comment": "Copy to data/identity.local.json (gitignored) and fill in. Placeholder values only in this file.",
+  "name": "Pat Example",
+  "email": "pat@example.com",
+  "phone": "+00 00000 00000",
+  "profileUrl": "linkedin.com/in/pat-example",
+  "homeCity": "Exampleville",
+  "currentEmployer": "Example Corp",
+  "otherTerms": []
+}

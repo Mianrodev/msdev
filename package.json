@@ -1,0 +1,42 @@
+{
+  "name": "prospect-crm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lead/prospect CRM: discovery → screen → triage → verify pipeline with editable criteria, dedup, reconciliation and an append-only audit log.",
+  "scripts": {
+    "dev": "npm run db:migrate && next dev",
+    "build": "next build",
+    "start": "npm run db:migrate && next start",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "import": "tsx scripts/import-workbook.ts",
+    "fixture": "tsx scripts/make-fixture-workbook.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=20.9"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.3",
+    "exceljs": "^4.4.0",
+    "next": "^16.3.7",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.7",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.2"
+  }
+}

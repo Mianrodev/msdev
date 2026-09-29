@@ -1,0 +1,258 @@
+/**
+ * Storage schema (SQLite via Drizzle). Every table carries `workspace_id` so
+ * multi-tenant support is a matter of resolving the workspace from an
+ * authenticated user, not a data-layer rewrite. To move to Postgres, port this
+ * file to `drizzle-orm/pg-core` (same column names) and swap the client in
+ * client.ts; the service layer only uses Drizzle's query builder.
+ *
+ * Deletion is blocked at the database level by triggers (see the
+ * `append_only` migration): records, target accounts and rules can only be
+ * archived/disabled, and history can only be appended to.
+ */
+import { sql } from "drizzle-orm";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+
+const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`;
+const timestamps = {
+  createdAt: text("created_at").notNull().default(now),
+  updatedAt: text("updated_at").notNull().default(now),
+};
+
+export const workspaces = sqliteTable("workspaces", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  ...timestamps,
+});
+
+const workspaceId = () =>
+  text("workspace_id")
+    .notNull()
+    .references(() => workspaces.id);
+
+/**
+ * One row per discovered item across its whole life. "Lead", "Prospect",
+ * "Held lead" and "Archived lead" are views over stage + status, so an item
+ * moving between them is a status change (logged to History), never a copy.
+ */
+export const records = sqliteTable(
+  "records",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: workspaceId(),
+    dedupKey: text("dedup_key").notNull(),
+
+    account: text("account").notNull(),
+    opportunity: text("opportunity").notNull(),
+    sourceUrl: text("source_url"),
+    nextStepUrl: text("next_step_url"),
+    sourceBoard: text("source_board"),
+    location: text("location"),
+    dateFound: text("date_found"),
+
+    stage: text("stage", { enum: ["discovery", "screen", "triage", "verify"] })
+      .notNull()
+      .default("discovery"),
+    status: text("status", { enum: ["active", "hold", "archived"] })
+      .notNull()
+      .default("active"),
+    sourceVerification: text("source_verification", { enum: ["unverified", "verified", "unreachable"] })
+      .notNull()
+      .default("unverified"),
+
+    discoveryVerdict: text("discovery_verdict"),
+    discoveryReason: text("discovery_reason"),
+    screenVerdict: text("screen_verdict"),
+    screenReason: text("screen_reason"),
+    screenConfidence: integer("screen_confidence"),
+    screenedAt: text("screened_at"),
+    triageVerdict: text("triage_verdict"),
+    triageReason: text("triage_reason"),
+    triageConfidence: integer("triage_confidence"),
+    triagedAt: text("triaged_at"),
+    verifyVerdict: text("verify_verdict"),
+    verifyReason: text("verify_reason"),
+    verifyConfidence: integer("verify_confidence"),
+    verifiedAt: text("verified_at"),
+
+    fitTier: text("fit_tier", { enum: ["exceptional", "strong", "good", "stretch"] }),
+    locationFit: text("location_fit"),
+    valueFit: text("value_fit"),
+    requirements: text("requirements"),
+    gapsHard: text("gaps_hard"),
+    gapsSoft: text("gaps_soft"),
+    fitRationale: text("fit_rationale"),
+    preparedBrief: text("prepared_brief"),
+    preparedAnswers: text("prepared_answers"),
+    lastVerifiedAt: text("last_verified_at"),
+    responseNotes: text("response_notes"),
+    outreachStatus: text("outreach_status", {
+      enum: ["not_started", "package_ready", "approved", "sent_manually", "responded", "closed"],
+    })
+      .notNull()
+      .default("not_started"),
+
+    // Personal contact details live only in these labelled, restricted fields —
+    // never in notes, never part of the display name or the dedup key.
+    contactName: text("contact_name"),
+    contactEmail: text("contact_email"),
+    contactPhone: text("contact_phone"),
+    contactProfileUrl: text("contact_profile_url"),
+    holdReason: text("hold_reason"),
+    nextAction: text("next_action"),
+    holdSince: text("hold_since"),
+    archiveReason: text("archive_reason"),
+    archivedAt: text("archived_at"),
+    notes: text("notes"),
+
+    /** Criterion values the rules evaluate, e.g. {"value": 85000, "location": "UNKNOWN"}. */
+    attributes: text("attributes", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    /** Imported columns with no first-class field — kept verbatim so nothing is lost. */
+    extra: text("extra", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    origin: text("origin").notNull().default("manual"),
+    lastReconciledAt: text("last_reconciled_at"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("records_ws_dedup").on(t.workspaceId, t.dedupKey),
+    index("records_ws_stage_status").on(t.workspaceId, t.stage, t.status),
+  ],
+);
+
+/** Accounts worth tracking for outreach even without a specific open opportunity. */
+export const targetAccounts = sqliteTable(
+  "target_accounts",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: workspaceId(),
+    dedupKey: text("dedup_key").notNull(),
+    name: text("name").notNull(),
+    website: text("website"),
+    sourceUrl: text("source_url"),
+    fit: text("fit"),
+    // Personal contact details live only in these labelled, restricted fields —
+    // never in notes, never part of the display name or the dedup key.
+    contactName: text("contact_name"),
+    contactEmail: text("contact_email"),
+    contactPhone: text("contact_phone"),
+    contactProfileUrl: text("contact_profile_url"),
+    description: text("description"),
+    evidence: text("evidence"),
+    fitRationale: text("fit_rationale"),
+    preparedBrief: text("prepared_brief"),
+    preparedBriefLong: text("prepared_brief_long"),
+    responseNotes: text("response_notes"),
+    status: text("status", { enum: ["tracking", "hold", "archived"] })
+      .notNull()
+      .default("tracking"),
+    archiveReason: text("archive_reason"),
+    notes: text("notes"),
+    attributes: text("attributes", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    extra: text("extra", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    origin: text("origin").notNull().default("manual"),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("target_accounts_ws_dedup").on(t.workspaceId, t.dedupKey)],
+);
+
+/** Stage criteria and process rules — replaces the workbook's hidden CONFIG sheet. */
+export const rules = sqliteTable(
+  "rules",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: workspaceId(),
+    key: text("key").notNull(),
+    label: text("label").notNull(),
+    description: text("description").notNull().default(""),
+    appliesFrom: text("applies_from", { enum: ["screen", "triage", "verify"] })
+      .notNull()
+      .default("screen"),
+    field: text("field").notNull().default(""),
+    operator: text("operator", { enum: ["gte", "lte", "includes_any", "excludes_all", "equals", "note"] }).notNull(),
+    value: text("value", { mode: "json" }).$type<unknown>(),
+    /** What a violation does: "reject" archives; "hold" parks the record in Hold. */
+    effect: text("effect", { enum: ["reject", "hold"] })
+      .notNull()
+      .default("reject"),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    origin: text("origin").notNull().default("manual"),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("rules_ws_key").on(t.workspaceId, t.key)],
+);
+
+/** Workspace-level settings (e.g. identity terms for redaction). */
+export const settings = sqliteTable(
+  "settings",
+  {
+    workspaceId: workspaceId(),
+    key: text("key").notNull(),
+    value: text("value", { mode: "json" }).$type<unknown>(),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("settings_ws_key").on(t.workspaceId, t.key)],
+);
+
+/** Append-only audit log. UPDATE and DELETE are blocked by triggers. */
+export const history = sqliteTable(
+  "history",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    workspaceId: workspaceId(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id"),
+    event: text("event").notNull(),
+    priorStatus: text("prior_status"),
+    newStatus: text("new_status"),
+    reason: text("reason"),
+    actor: text("actor").notNull(),
+    detail: text("detail", { mode: "json" }).$type<Record<string, unknown>>(),
+    /** Business date of the change (may be historical for imported entries). */
+    occurredAt: text("occurred_at").notNull().default(now),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("history_ws_entity").on(t.workspaceId, t.entityType, t.entityId)],
+);
+
+/** One row per "Run update" — the weekly pipeline run — with its summary. */
+export const pipelineRuns = sqliteTable("pipeline_runs", {
+  id: text("id").primaryKey(),
+  workspaceId: workspaceId(),
+  actor: text("actor").notNull(),
+  summary: text("summary", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at").notNull(),
+});
+
+export const importBatches = sqliteTable("import_batches", {
+  id: text("id").primaryKey(),
+  workspaceId: workspaceId(),
+  fileName: text("file_name").notNull(),
+  /** Per-sheet source row counts and outcomes, for the no-record-loss check. */
+  summary: text("summary", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  createdAt: text("created_at").notNull().default(now),
+});
+
+/** Every source row, verbatim, linked to what it became. Guarantees nothing is lost in migration. */
+export const importRows = sqliteTable(
+  "import_rows",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    workspaceId: workspaceId(),
+    batchId: text("batch_id")
+      .notNull()
+      .references(() => importBatches.id),
+    sheet: text("sheet").notNull(),
+    rowNumber: integer("row_number").notNull(),
+    raw: text("raw", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id"),
+    outcome: text("outcome").notNull(),
+  },
+  (t) => [index("import_rows_batch").on(t.batchId, t.sheet)],
+);
+
+export type RecordRow = typeof records.$inferSelect;
+export type NewRecordRow = typeof records.$inferInsert;
+export type TargetAccountRow = typeof targetAccounts.$inferSelect;
+export type RuleRow = typeof rules.$inferSelect;
+export type HistoryRow = typeof history.$inferSelect;
