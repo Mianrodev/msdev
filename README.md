@@ -114,6 +114,11 @@ loaded on every start.
      in New to review are left for you.
   3. Returns a counts-only summary (in vs out per stage, moved to Hold/Archive,
      active prospects by tier) and logs every change to History.
+- **My answers**: the owner's reusable application answers (intro, notice
+  period, pay…), shown with Copy buttons on every Ready lead. Stored in
+  settings, never exported, logged without their text.
+- **Password**: change it, or make a one-time recovery code (shown once,
+  stored as a hash). "Forgot your password?" on the sign-in page uses it.
 - **Records**: list, filter and sort by view (Leads / Prospects / Hold /
   Archive), stage, status and tier, or search. Open a record to edit it, make
   the next stage decision (a reason is always required), hold, archive or

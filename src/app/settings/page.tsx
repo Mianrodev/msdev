@@ -1,10 +1,8 @@
 import Link from "next/link";
 import { createRuleAction, toggleRuleAction } from "../actions";
-import { changePasswordAction } from "../login/actions";
 import { SubmitButton } from "@/components/client";
 import { ruleSentence, RuleFields, STEP_FROM } from "@/components/rule-form";
 import { Flash, PageHeader, type SearchParams } from "@/components/ui";
-import { MIN_PASSWORD_LENGTH, passwordManagedByHost } from "@/lib/auth";
 import { listFieldNames } from "@/services/records";
 import { getCtx } from "@/services/request";
 import { listRules } from "@/services/rules";
@@ -100,33 +98,8 @@ export default async function RulesPage({ searchParams }: { searchParams: Search
         </ul>
       </details>
 
-      <h2>Your password</h2>
-      {passwordManagedByHost() ? (
-        <p className="muted">Your password is set in the hosting settings.</p>
-      ) : (
-        <details className="card">
-          <summary>Change password</summary>
-          <form action={changePasswordAction} className="stack" style={{ maxWidth: 440 }}>
-            <label>
-              Current password
-              <input type="password" name="current" required autoComplete="current-password" />
-            </label>
-            <label>
-              New password <span className="hint">(at least {MIN_PASSWORD_LENGTH} characters)</span>
-              <input type="password" name="password" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
-            </label>
-            <label>
-              Type the new password again
-              <input type="password" name="confirm" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
-            </label>
-            <div>
-              <SubmitButton pending="Saving…">Change password</SubmitButton>
-            </div>
-          </form>
-        </details>
-      )}
       <p className="small muted" style={{ marginTop: "1.2rem" }}>
-        Looking for the personal-details protection? It&apos;s on the <Link href="/privacy">Privacy</Link> page.
+        Looking for the personal-details protection? It&apos;s on the <Link href="/privacy">Privacy</Link> page. Your password and recovery code are on the <Link href="/account">Password</Link> page.
       </p>
     </>
   );

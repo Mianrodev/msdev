@@ -165,3 +165,11 @@ ul.plain li:last-child { border-bottom: 0; }
   dl.kv { grid-template-columns: 1fr; }
   dl.kv dt { margin-top: .4rem; }
 }
+
+.recovery-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  overflow-wrap: anywhere;
+}

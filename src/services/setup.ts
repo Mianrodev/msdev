@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { importBatches, pipelineRuns, records, targetAccounts } from "@/db/schema";
 import type { Ctx } from "./context";
 import { getIdentityTerms } from "./rules";
+import { hasRecoveryCode } from "@/lib/auth";
 
 export interface SetupStatus {
   records: number;
@@ -10,7 +11,7 @@ export interface SetupStatus {
   imports: number;
   runs: number;
   identityTerms: number;
-  steps: { key: "password" | "upload" | "privacy" | "weekly"; done: boolean }[];
+  steps: { key: "password" | "recovery" | "upload" | "privacy" | "weekly"; done: boolean }[];
   allDone: boolean;
 }
 
@@ -22,15 +23,17 @@ export async function getSetupStatus(ctx: Ctx): Promise<SetupStatus> {
       .where(eq(table.workspaceId, ctx.workspaceId));
     return row?.n ?? 0;
   };
-  const [recs, accounts, imports, runs, terms] = await Promise.all([
+  const [recs, accounts, imports, runs, terms, recovery] = await Promise.all([
     count(records),
     count(targetAccounts),
     count(importBatches),
     count(pipelineRuns),
     getIdentityTerms(ctx),
+    hasRecoveryCode(ctx.db),
   ]);
   const steps: SetupStatus["steps"] = [
     { key: "password", done: true },
+    { key: "recovery", done: recovery },
     { key: "upload", done: imports > 0 || recs > 0 },
     { key: "privacy", done: terms.length > 0 },
     { key: "weekly", done: runs > 0 },

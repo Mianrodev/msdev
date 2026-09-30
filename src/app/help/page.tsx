@@ -21,7 +21,8 @@ export default function HelpPage() {
           </li>
           <li>
             Open your <Link href="/records?list=ready">Ready</Link> list. For each lead: open the listing, apply{" "}
-            <em>yourself</em>, then press <strong>I&apos;ve applied</strong>.
+            <em>yourself</em> (copy your usual answers from <Link href="/answers">My answers</Link> — they show on every
+            Ready lead), then press <strong>I&apos;ve applied</strong>.
           </li>
           <li>
             Found something elsewhere? <Link href="/records/new">Add it by hand</Link>. Want the app to watch a new company?
@@ -109,9 +110,18 @@ export default function HelpPage() {
           </p>
         </div>
         <div className="card">
+          <h3>I forgot my password. What now?</h3>
+          <p>
+            On the sign-in page, press <strong>Forgot your password?</strong>, type your recovery code and choose a new
+            password. No recovery code? Make one now on the <Link href="/account">Password</Link> page, so you&apos;re never
+            locked out.
+          </p>
+        </div>
+        <div className="card">
           <h3>How do I change my password?</h3>
           <p>
-            Go to <Link href="/settings">Rules</Link> and scroll to &quot;Your password&quot;.
+            Open <Link href="/account">Password</Link> (top right, next to Sign out). That&apos;s also where you make your
+            recovery code.
           </p>
         </div>
       </div>

@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { changePassword, checkPassword, createFirstPassword, isValidSession, newSessionToken, passwordIsSet, passwordProblem } from "@/lib/auth";
+import {
+  changePassword,
+  checkPassword,
+  createFirstPassword,
+  hasRecoveryCode,
+  isValidSession,
+  newRecoveryCode,
+  newSessionToken,
+  passwordIsSet,
+  passwordProblem,
+  resetWithRecoveryCode,
+} from "@/lib/auth";
 import { signSession } from "@/lib/session";
 import { testCtx } from "./helpers";
 
@@ -38,6 +49,25 @@ describe("first-visit password setup", () => {
     await changePassword(db, "a brand new password");
     expect(await checkPassword(db, "correct horse battery")).toBe(false);
     expect(await checkPassword(db, "a brand new password")).toBe(true);
+  });
+
+  it("lets a recovery code set a new password once, and only the newest code works", async () => {
+    const { db } = await testCtx();
+    await createFirstPassword(db, "correct horse battery");
+    expect(await hasRecoveryCode(db)).toBe(false);
+    const old = await newRecoveryCode(db);
+    const code = await newRecoveryCode(db);
+    expect(code).toMatch(/^[A-Z2-9]{4}(-[A-Z2-9]{4}){4}$/);
+    expect(await hasRecoveryCode(db)).toBe(true);
+    expect(JSON.stringify(await db.execute("select value from settings where key = 'auth.recoveryHash'"))).not.toContain(code.replace(/-/g, ""));
+
+    expect(await resetWithRecoveryCode(db, old, "a brand new password")).toBe(false);
+    expect(await resetWithRecoveryCode(db, "", "a brand new password")).toBe(false);
+    expect(await resetWithRecoveryCode(db, ` ${code.toLowerCase().replace(/-/g, " ")} `, "a brand new password")).toBe(true);
+    expect(await checkPassword(db, "a brand new password")).toBe(true);
+    // Used up.
+    expect(await hasRecoveryCode(db)).toBe(false);
+    expect(await resetWithRecoveryCode(db, code, "another password!!")).toBe(false);
   });
 
   it("uses APP_PASSWORD from the host when set", async () => {

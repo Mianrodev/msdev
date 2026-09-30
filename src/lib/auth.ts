@@ -22,6 +22,7 @@ const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) =>
 
 const PASSWORD_KEY = "auth.passwordHash";
 const SECRET_KEY = "auth.sessionSecret";
+const RECOVERY_KEY = "auth.recoveryHash";
 export const MIN_PASSWORD_LENGTH = 10;
 
 async function readSetting(db: Db, key: string): Promise<string | undefined> {
@@ -31,6 +32,17 @@ async function readSetting(db: Db, key: string): Promise<string | undefined> {
     .where(and(eq(settings.workspaceId, DEFAULT_WORKSPACE_ID), eq(settings.key, key)))
     .limit(1);
   return typeof row?.value === "string" ? row.value : undefined;
+}
+
+async function writeSetting(db: Db, key: string, value: string) {
+  await ensureWorkspace(db);
+  await db
+    .insert(settings)
+    .values({ workspaceId: DEFAULT_WORKSPACE_ID, key, value })
+    .onConflictDoUpdate({
+      target: [settings.workspaceId, settings.key],
+      set: { value, updatedAt: new Date().toISOString() },
+    });
 }
 
 /** Insert only if absent. Returns true if this call created it. */
@@ -102,10 +114,34 @@ export async function createFirstPassword(db: Db, pw: string): Promise<boolean> 
 
 /** Change the password (caller must have verified the current one). */
 export async function changePassword(db: Db, pw: string): Promise<void> {
-  await db
-    .update(settings)
-    .set({ value: await hash(pw), updatedAt: new Date().toISOString() })
-    .where(and(eq(settings.workspaceId, DEFAULT_WORKSPACE_ID), eq(settings.key, PASSWORD_KEY)));
+  await writeSetting(db, PASSWORD_KEY, await hash(pw));
+}
+
+// Recovery code: the way back in if the password is forgotten. Shown once, stored only as a hash.
+// No 0/O/1/I so it can't be misread when written down.
+const CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const cleanCode = (code: string) => code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+export async function hasRecoveryCode(db: Db): Promise<boolean> {
+  return !!process.env.APP_PASSWORD || !!(await readSetting(db, RECOVERY_KEY));
+}
+
+/** Make a new recovery code (the old one stops working). Returns it for showing once. */
+export async function newRecoveryCode(db: Db): Promise<string> {
+  const bytes = randomBytes(20);
+  const code = Array.from(bytes, (b) => CODE_LETTERS[b % CODE_LETTERS.length]).join("");
+  await writeSetting(db, RECOVERY_KEY, await hash(code));
+  return code.match(/.{4}/g)!.join("-");
+}
+
+/** Forgotten password: a correct recovery code sets a new password. The code is then used up. */
+export async function resetWithRecoveryCode(db: Db, code: string, pw: string): Promise<boolean> {
+  if (process.env.APP_PASSWORD) return false;
+  const stored = await readSetting(db, RECOVERY_KEY);
+  if (!stored || !cleanCode(code) || !(await matches(cleanCode(code), stored))) return false;
+  await writeSetting(db, PASSWORD_KEY, await hash(pw));
+  await writeSetting(db, RECOVERY_KEY, "");
+  return true;
 }
 
 export async function newSessionToken(db: Db): Promise<string> {

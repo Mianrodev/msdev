@@ -119,8 +119,8 @@ export async function setSetting(ctx: Ctx, key: string, value: unknown, reason =
   } else {
     await ctx.db.insert(settings).values({ workspaceId: ctx.workspaceId, key, value });
   }
-  // Identity terms are themselves sensitive: log that they changed, not their values.
-  const sensitive = key === IDENTITY_TERMS_KEY || key.startsWith("privacy.") || key.startsWith("auth.");
+  // Identity terms and saved answers are personal: log that they changed, not their values.
+  const sensitive = key === IDENTITY_TERMS_KEY || key.startsWith("privacy.") || key.startsWith("auth.") || key.startsWith("answers.");
   await logHistory(ctx, {
     entityType: "setting",
     entityId: key,

@@ -17,6 +17,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import { records, settings as settingsTable, targetAccounts, type RecordRow } from "@/db/schema";
+import { normalizeText } from "@/core/dedup";
 import { containsTerm, evaluate, type RuleInput } from "@/core/rules";
 import {
   boardKey,
@@ -424,6 +425,10 @@ export async function runDiscovery(
   // Every posting any existing lead points at (including archived ones — a rejected job isn't re-added).
   const all = await ctx.db.select().from(records).where(eq(records.workspaceId, ctx.workspaceId));
   const byPosting = new Map<string, RecordRow[]>();
+  // Same company + same job title = the same job, even if you saved it from LinkedIn or another site,
+  // or the company posted it once per city.
+  const sameJob = (company: string, title: string) => `${normalizeText(company)}|${normalizeText(title)}`;
+  const knownJobs = new Set(all.map((r) => sameJob(r.account, r.opportunity)));
   for (const r of all) {
     for (const link of new Set([r.sourceUrl, r.nextStepUrl])) {
       const d = detectBoard(link);
@@ -461,7 +466,7 @@ export async function runDiscovery(
     for (const p of res.postings) {
       if (!p.title || !p.url || !titleMatches(p.title, settings)) continue;
       report.jobsMatching++;
-      if (byPosting.has(postingKey(b.ref, p.id))) {
+      if (byPosting.has(postingKey(b.ref, p.id)) || knownJobs.has(sameJob(company, p.title))) {
         report.alreadyKnown++;
         continue;
       }
@@ -486,6 +491,7 @@ export async function runDiscovery(
       if (created) {
         report.newLeads++;
         byPosting.set(postingKey(b.ref, p.id), []);
+        knownJobs.add(sameJob(company, p.title));
       } else report.alreadyKnown++;
     }
   }

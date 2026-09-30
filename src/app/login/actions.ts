@@ -1,9 +1,18 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
-import { changePassword, checkPassword, createFirstPassword, newSessionToken, passwordProblem } from "@/lib/auth";
+import {
+  changePassword,
+  checkPassword,
+  createFirstPassword,
+  newRecoveryCode,
+  newSessionToken,
+  passwordProblem,
+  resetWithRecoveryCode,
+} from "@/lib/auth";
 import { SESSION_COOKIE, SESSION_DAYS } from "@/lib/session";
 import { getCtx } from "@/services/request";
 
@@ -32,7 +41,7 @@ export async function setupAction(f: FormData) {
   const created = await createFirstPassword(await getDb(), pw);
   if (!created) redirect(`/login?error=${q("A password has already been set. Sign in with it.")}`);
   await startSession();
-  redirect("/?ok=" + q("Password created — you're signed in. Follow the Getting started steps below."));
+  redirect("/?ok=" + q("Password created — you're signed in. Next, save a recovery code in case you ever forget it."));
 }
 
 export async function loginAction(f: FormData) {
@@ -63,5 +72,27 @@ export async function changePasswordAction(f: FormData) {
       msg = "ok=" + q("Password changed.");
     }
   }
-  redirect(`/settings?${msg}`);
+  redirect(`/account?${msg}`);
+}
+
+export async function resetPasswordAction(f: FormData) {
+  const pw = String(f.get("password") ?? "");
+  const problem = passwordProblem(pw, String(f.get("confirm") ?? ""));
+  if (problem) redirect(`/login?forgot=1&error=${q(problem)}`);
+  if (!(await resetWithRecoveryCode(await getDb(), String(f.get("code") ?? ""), pw))) {
+    await new Promise((r) => setTimeout(r, 1000)); // slow down guessing
+    redirect(`/login?forgot=1&error=${q("That recovery code isn't right (or it was already used). Check each letter and try again.")}`);
+  }
+  await startSession();
+  redirect(
+    "/?ok=" + q("New password saved — you're signed in. Your recovery code is now used up, so make a new one (see Getting started below)."),
+  );
+}
+
+/** Shown once on screen; only a hash is kept. */
+export async function makeRecoveryCodeAction(): Promise<{ code: string }> {
+  const ctx = await getCtx();
+  const code = await newRecoveryCode(ctx.db);
+  revalidatePath("/", "layout"); // "Saved" label and the Getting started guide update straight away
+  return { code };
 }

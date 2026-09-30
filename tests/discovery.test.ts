@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { detectBoard } from "@/sources/job-boards";
 import { listRecords, getRecord, upsertLead, holdRecord } from "@/services/records";
 import { createRule } from "@/services/rules";
-import { regionVerdict, reviewFoundJob, runDiscovery, seedDiscoveryRules, titleMatches, DEFAULTS } from "@/services/discovery";
+import { addBoard, regionVerdict, reviewFoundJob, runDiscovery, seedDiscoveryRules, titleMatches, DEFAULTS } from "@/services/discovery";
 import { runUpdate } from "@/services/run-update";
 import { listHistory } from "@/services/history";
 import { testCtx } from "./helpers";
@@ -112,5 +112,20 @@ describe("finding leads", () => {
     expect(rep.boardsChecked).toBe(0);
     expect(rep.boardsFailed).toHaveLength(1);
     expect((await getRecord(ctx, r.id)).attributes.verifiedOpen).toBeUndefined();
+  });
+
+  it("doesn't suggest a job you already saved from another site, or the same job twice", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    // Saved from LinkedIn — different link, same company and title.
+    await upsertLead(ctx, { account: "Acme Inc.", opportunity: "Implementation  Specialist", sourceUrl: "https://www.linkedin.com/jobs/view/1" });
+    const twice = [...board, { ...board[1], id: "88888888-8888-8888-8888-888888888888", hostedUrl: "https://jobs.lever.co/acme/88888888-8888-8888-8888-888888888888" }];
+    await addBoard(ctx, "https://jobs.lever.co/acme");
+    const rep = await runDiscovery(ctx, {
+      fetcher: async (url: string) => (url.includes("/v0/postings/acme") ? { status: 200, json: async () => twice } : { status: 404, json: async () => ({}) }),
+    });
+    const found = (await listRecords(ctx)).filter((r) => r.origin === "discovery").map((r) => r.opportunity);
+    expect(found).toEqual(["Implementation Consultant"]);
+    expect(rep).toMatchObject({ newLeads: 1, alreadyKnown: 2 });
   });
 });

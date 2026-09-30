@@ -15,6 +15,12 @@ export const maxDuration = 300;
 
 const STEPS = {
   password: { title: "Create your password", text: "Done — only you can sign in.", href: null, button: null },
+  recovery: {
+    title: "Save a recovery code",
+    text: "If you ever forget your password, this code gets you back in. Make it and write it down.",
+    href: "/account#recovery",
+    button: "Make recovery code",
+  },
   upload: {
     title: "Upload your tracker spreadsheet",
     text: "Bring in your existing leads from the Excel file. Nothing in the file is lost.",
@@ -59,7 +65,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
 
       {!setup.allDone && (
         <section style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ marginTop: ".5rem" }}>Getting started — {setup.steps.filter((s) => s.done).length} of 4 done</h2>
+          <h2 style={{ marginTop: ".5rem" }}>Getting started — {setup.steps.filter((s) => s.done).length} of {setup.steps.length} done</h2>
           <ol className="steps">
             {setup.steps.map((s, i) => {
               const step = STEPS[s.key];

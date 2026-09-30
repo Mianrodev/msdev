@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   archiveAction,
@@ -29,6 +30,7 @@ import {
 import { AttributeFields, RecordFields } from "@/components/record-fields";
 import { BackLink, Checks, Ext, Flash, StatusPill, type SearchParams } from "@/components/ui";
 import { FIT_TIERS, SOURCE_VERIFICATION, VERDICTS } from "@/core/types";
+import { getAnswers } from "@/services/answers";
 import { listHistory } from "@/services/history";
 import { evaluateRecord, getRecord, NotFoundError, pendingDecision } from "@/services/records";
 import { getCtx } from "@/services/request";
@@ -56,10 +58,11 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
     if (e instanceof NotFoundError) notFound();
     throw e;
   }
-  const [pending, overall, hist] = await Promise.all([
+  const [pending, overall, hist, answers] = await Promise.all([
     pendingDecision(ctx, r),
     evaluateRecord(ctx, r, "all"),
     listHistory(ctx, { entityType: "record", entityId: id, limit: 200 }),
+    getAnswers(ctx),
   ]);
   const list = listOf(r);
   const link = r.nextStepUrl ?? r.sourceUrl;
@@ -109,9 +112,16 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               <>
                 <ol style={{ margin: ".2rem 0 .8rem", paddingLeft: "1.2rem" }}>
                   <li>
-                    {r.preparedBrief || r.preparedAnswers
-                      ? "Read the prepared brief and answers below (use the Copy buttons)."
-                      : "Read about the job below. There's no prepared cover letter yet — write your own, or add one under Edit details."}
+                    {r.preparedBrief || r.preparedAnswers ? (
+                      "Read the prepared brief and answers below (use the Copy buttons)."
+                    ) : answers.length ? (
+                      "Read about the job below. Use your saved answers below (Copy buttons) to fill in the application."
+                    ) : (
+                      <>
+                        Read about the job below. Tip: write your usual answers once on <Link href="/answers">My answers</Link>{" "}
+                        and they&apos;ll appear here with Copy buttons.
+                      </>
+                    )}
                   </li>
                   <li>Open the listing and apply yourself. This app never applies or sends anything for you.</li>
                   <li>Come back and press &quot;I&apos;ve applied&quot; so you can keep track.</li>
@@ -291,6 +301,25 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </>
           )}
         </section>
+      )}
+
+      {/* ---------------- Saved answers (same on every lead) ---------------- */}
+      {list === "ready" && answers.length > 0 && (
+        <details className="card" style={{ marginBottom: "1rem" }} open={!(r.preparedBrief || r.preparedAnswers)}>
+          <summary>Your saved answers ({answers.length})</summary>
+          {answers.map((a, i) => (
+            <div key={i} style={{ marginTop: ".8rem" }}>
+              <div className="spread">
+                <h3 style={{ margin: 0 }}>{a.title}</h3>
+                <CopyButton text={a.text} />
+              </div>
+              <div className="package">{a.text}</div>
+            </div>
+          ))}
+          <p className="small muted">
+            <Link href="/answers">Change your saved answers</Link>
+          </p>
+        </details>
       )}
 
       <div className="grid cols-2">

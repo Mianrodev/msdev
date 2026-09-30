@@ -20,6 +20,7 @@ import { runReconciliation } from "@/services/reconcile";
 import { runUpdate } from "@/services/run-update";
 import { describeSearch, humanize, OUTREACH_NAMES, SOURCE_NAMES, whereItIs } from "@/components/plain";
 import { addBoard, reviewFoundJob, runDiscovery, saveDiscoveryWords, setBoardEnabled } from "@/services/discovery";
+import { saveAnswers } from "@/services/answers";
 import { savePrivacy, PRIVACY_FIELDS, type PrivacyDetails } from "@/services/privacy";
 import { createRule, IDENTITY_TERMS_KEY, setRuleEnabled, setSetting, updateRule } from "@/services/rules";
 import { getCtx } from "@/services/request";
@@ -364,6 +365,19 @@ export async function privacyAction(f: FormData) {
     return n
       ? `Saved. ${n} words and phrases are now hidden from anything you share or download as a shared copy.`
       : "Saved. Nothing is being hidden yet — fill in at least your name.";
+  });
+}
+
+/** Saved answers: rows come as title:<n> / text:<n> pairs. A row without text is dropped. */
+export async function answersAction(f: FormData) {
+  const ctx = await getCtx();
+  await act("/answers", async () => {
+    const rows = [];
+    for (let i = 0; f.has(`title:${i}`) || f.has(`text:${i}`); i++) {
+      rows.push({ title: String(f.get(`title:${i}`) ?? ""), text: String(f.get(`text:${i}`) ?? "") });
+    }
+    const n = await saveAnswers(ctx, rows);
+    return n ? `Saved ${n} ${n === 1 ? "answer" : "answers"}. They now show on every Ready lead with a Copy button.` : "Saved. You have no answers yet.";
   });
 }
 
