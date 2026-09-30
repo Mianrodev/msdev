@@ -301,6 +301,15 @@ export function describeSearch(d: DiscoveryReport): string[] {
     lines.push(`${plural(d.notConfirmedTotal, "job")} on remote-job sites couldn't be confirmed with the company, so ${d.notConfirmedTotal === 1 ? "it wasn't" : "they weren't"} added (see Find leads to check them yourself).`);
   if (d.warningSkipped) lines.push(`Dropped ${plural(d.warningSkipped, "listing")} showing scam warning signs.`);
   if (d.capped) lines.push("There were more new jobs than one search adds — the rest will come in next time.");
+  if (d.data) {
+    const mb = d.data.downloadedKb >= 1024 ? `${(d.data.downloadedKb / 1024).toFixed(1)} MB` : `${d.data.downloadedKb} KB`;
+    // The size of the listings as read; boards send them compressed, so less than this crosses the network.
+    lines.push(
+      d.data.boardsReused
+        ? `Read ${mb} of new listings; reused ${plural(d.data.boardsReused, "company board")} already read in the last 12 hours (saves data).`
+        : `Read ${mb} of listings.`,
+    );
+  }
   if (d.boardsFailed.length) lines.push(`${plural(d.boardsFailed.length, "board")} couldn't be read this time (see Find leads).`);
   if (d.sitesFailed?.length) lines.push(`${plural(d.sitesFailed.length, "remote-job site")} couldn't be read this time.`);
   return lines;

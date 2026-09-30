@@ -222,7 +222,10 @@ describe("finding leads", () => {
         : { status: 404, json: async () => ({}) };
     await runDiscovery(ctx, { fetcher: gh, sites: false });
     open = false;
-    const rep = await runDiscovery(ctx, { fetcher: gh, sites: false });
+    // Straight after, the shared copy is reused (nothing downloaded again)…
+    expect((await runDiscovery(ctx, { fetcher: gh, sites: false })).closed).toBe(0);
+    // …a fresh read notices the job has gone.
+    const rep = await runDiscovery(ctx, { fetcher: gh, sites: false, maxAgeMs: 0 });
     expect(rep.closed).toBe(1);
     expect((await getRecord(ctx, saved.id)).attributes.verifiedOpen).toMatch(/^NO/);
   });
@@ -239,5 +242,39 @@ describe("finding leads", () => {
           : { status: 404, json: async () => ({}) };
     const rep = await runDiscovery(ctx, { fetcher: f });
     expect(rep.notConfirmedTotal).toBe(0);
+  });
+
+  it("downloads each board once and shares it: a second search, or another person's, reuses the copy", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    await addBoard(ctx, "https://jobs.lever.co/acme");
+    const calls: string[] = [];
+    const counting = async (url: string) => {
+      calls.push(url);
+      return fetcher()(url);
+    };
+    const first = await runDiscovery(ctx, { fetcher: counting, sites: false });
+    expect(calls.filter((u) => u.includes("/v0/postings/acme"))).toHaveLength(1);
+    expect(first.data).toMatchObject({ boardsDownloaded: 1, boardsReused: 0 });
+    calls.length = 0;
+    const again = await runDiscovery(ctx, { fetcher: counting, sites: false });
+    expect(calls).toEqual([]);
+    expect(again.data).toMatchObject({ boardsDownloaded: 0, boardsReused: 1 });
+    // Someone else watching the same company: no download either.
+    const other = { ...ctx, workspaceId: "someone-else" };
+    await ctx.db.execute("insert into workspaces (id, name) values ('someone-else', 'Other') on conflict do nothing");
+    await addBoard(other, "https://jobs.lever.co/acme");
+    await runDiscovery(other, { fetcher: counting, sites: false });
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps only small facts in the shared copy, plus descriptions of jobs someone could want", async () => {
+    const ctx = await testCtx();
+    await addBoard(ctx, "https://jobs.lever.co/acme");
+    await runDiscovery(ctx, { fetcher: fetcher(), sites: false });
+    const rows = (await ctx.db.execute("select value from source_cache where key like 'board:%'")) as unknown as { rows?: { value: { postings: { title: string; summary: string | null }[] } }[] };
+    const postings = (rows.rows ?? (rows as unknown as { value: { postings: { title: string; summary: string | null }[] } }[]))[0].value.postings;
+    expect(postings.find((p) => p.title === "Account Executive")?.summary).toBeNull();
+    expect(postings.find((p) => p.title === "Implementation Specialist")?.summary).toMatch(/Implementation Specialist/);
   });
 });

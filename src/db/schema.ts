@@ -69,6 +69,16 @@ export const invites = pgTable(
   (t) => [uniqueIndex("invites_token_uq").on(t.tokenHash)],
 );
 
+/**
+ * Public job-board data fetched once and shared by every workspace (nothing private: only what
+ * a company's own careers page publishes). Saves downloading the same board twice.
+ */
+export const sourceCache = pgTable("source_cache", {
+  key: text("key").primaryKey(),
+  fetchedAt: text("fetched_at").notNull(),
+  value: jsonb("value").$type<unknown>().notNull(),
+});
+
 const workspaceId = () =>
   text("workspace_id")
     .notNull()

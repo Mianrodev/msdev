@@ -29,8 +29,10 @@ import {
   boardKey,
   boardLink,
   candidateBoards,
+  countingFetcher,
   detectBoard,
   fetchBoard,
+  fetchPostingSummary,
   postingKey,
   PROVIDER_NAMES,
   type BoardRef,
@@ -39,6 +41,7 @@ import {
 } from "@/sources/job-boards";
 import { fetchSite, SITES, warningSigns, type Listing, type Site } from "@/sources/job-sites";
 import { asSystem, type Ctx } from "./context";
+import { BOARD_FRESH_MS, readCache, readCacheMany, writeCache } from "./source-cache";
 import { logHistory } from "./history";
 import { archiveRecord, decideStage, getRecord, holdRecord, upsertLead } from "./records";
 import { activeRules, createRule, getSetting, listRules, setSetting } from "./rules";
@@ -275,6 +278,12 @@ export async function getDiscoverySettings(ctx: Ctx): Promise<DiscoverySettings>
   };
 }
 
+/** Everyone's job-title words (so a shared copy keeps what anyone might want). */
+async function allTitleWords(ctx: Ctx): Promise<string[]> {
+  const rows = await ctx.db.select({ v: settingsTable.value }).from(settingsTable).where(eq(settingsTable.key, K.titleWords));
+  return [...new Set([...DEFAULTS.titleWords, ...rows.flatMap((r) => (Array.isArray(r.v) ? r.v.map(String) : []))])];
+}
+
 export async function setSiteEnabled(ctx: Ctx, site: string, on: boolean) {
   if (!(site in SITES)) throw new Error("Unknown job site");
   const s = await getDiscoverySettings(ctx);
@@ -469,6 +478,8 @@ export interface DiscoveryReport {
   warningSkipped?: number;
   /** How long each part took (seconds), and one database round trip (ms) — for spotting slow set-ups. */
   timing?: { boards: number; sites: number; saving: number; total: number; dbMs: number };
+  /** How much was downloaded, and how many boards were reused from a copy read in the last 12 hours. */
+  data?: { downloadedKb: number; boardsReused: number; boardsDownloaded: number };
 }
 
 async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -497,7 +508,15 @@ const MAX_COMPANIES_PER_SEARCH = 80;
 
 export async function runDiscovery(
   ctx: Ctx,
-  opts: { fetcher?: Fetcher; maxNew?: number; today?: string; sites?: boolean; siteBudgetMs?: number } = {},
+  opts: {
+    fetcher?: Fetcher;
+    maxNew?: number;
+    today?: string;
+    sites?: boolean;
+    siteBudgetMs?: number;
+    /** Reuse boards read by anyone within this long (default 12 hours); 0 = read everything fresh. */
+    maxAgeMs?: number;
+  } = {},
 ): Promise<DiscoveryReport> {
   const sys = asSystem(ctx, "job-board-search");
   const started = Date.now();
@@ -517,8 +536,35 @@ export async function runDiscovery(
   const allBoards = await listBoards(ctx);
   const boards = allBoards.filter((b) => b.enabled);
 
+  // Fetch once, share with everyone: a board anyone read in the last 12 hours is reused, not downloaded
+  // again. Only small facts are kept, plus the description of jobs whose titles match anyone's words.
+  const maxAge = opts.maxAgeMs ?? BOARD_FRESH_MS;
+  const counter = countingFetcher(opts.fetcher);
+  const fetcher = counter.fetcher;
+  const anyonesWords = await allTitleWords(ctx);
+  const worthDescribing = (title: string) => anyonesWords.some((w) => containsTerm(title, w));
+  type Kept = { company: string | null; postings: Posting[] };
+  const keyOf = (ref: BoardRef) => `board:${boardKey(ref)}`;
+  const kept = await readCacheMany<Kept>(ctx.db, boards.map((b) => keyOf(b.ref)), maxAge);
+  let reused = 0;
+  let fetched = 0;
+  const getBoard = async (ref: BoardRef): Promise<({ ok: true } & Kept) | { ok: false; error: string }> => {
+    const hit = kept.get(keyOf(ref)) ?? (await readCache<Kept>(ctx.db, keyOf(ref), maxAge))?.value;
+    if (hit) {
+      reused++;
+      return { ok: true, ...hit };
+    }
+    const res = await fetchBoard(ref, fetcher);
+    if (!res.ok) return res;
+    fetched++;
+    const slim: Kept = { company: res.company, postings: res.postings.map((p) => ({ ...p, summary: worthDescribing(p.title) ? p.summary : null })) };
+    await writeCache(ctx.db, keyOf(ref), slim);
+    kept.set(keyOf(ref), slim);
+    return { ok: true, ...slim };
+  };
+
   const tFetch = Date.now();
-  const results = await pool(boards, 16, async (b) => ({ b, res: await fetchBoard(b.ref, opts.fetcher) }));
+  const results = await pool(boards, 16, async (b) => ({ b, res: await getBoard(b.ref) }));
   fetchMs = Date.now() - tFetch;
   const report: DiscoveryReport = {
     finishedAt: "",
@@ -614,11 +660,6 @@ export async function runDiscovery(
         report.capped = true;
         continue;
       }
-      // Even on a careers page, a listing showing scam signs is never added.
-      if (warningSigns(`${p.title}\n${p.summary ?? ""}`).length) {
-        report.warningSkipped!++;
-        continue;
-      }
       // Jobs that clearly fail your first-look rules (on-site, another region…) are counted, not added.
       const attributes = foundJobAttributes(ref, company, p, settings, today, via);
       const firstLook = evaluate(rules, { account: company, opportunity: p.title, location: p.location, sourceBoard: PROVIDER_NAMES[ref.provider], ...attributes }, "screen");
@@ -626,9 +667,16 @@ export async function runDiscovery(
         report.filteredOut++;
         continue;
       }
+      // Boards whose list leaves descriptions out: fetch this one job's description (one small request).
+      const job = p.summary ? p : { ...p, summary: await fetchPostingSummary(ref, p.id, fetcher) };
+      // Even on a careers page, a listing showing scam signs is never added.
+      if (warningSigns(`${job.title}\n${job.summary ?? ""}`).length) {
+        report.warningSkipped!++;
+        continue;
+      }
       let created = false;
       try {
-        created = await addFoundJob(sys, ref, company, p, attributes, today);
+        created = await addFoundJob(sys, ref, company, job, attributes, today);
       } catch {
         report.skipped++; // one unusual listing never stops the search
         continue;
@@ -655,10 +703,16 @@ export async function runDiscovery(
     const siteKeys = (Object.keys(SITES) as Site[]).filter((site) => !settings.offSites.includes(site));
     const general = /^(anywhere|worldwide|global|international|apac|asia|emea|latam|remote)$/i;
     const country = settings.regionWords.find((w) => !general.test(w.trim()));
-    const siteResults = await pool(siteKeys, 6, async (site) => ({
-      site,
-      res: await fetchSite(site, { searchWords: settings.titleWords, country, deadline: tSites + (opts.siteBudgetMs ?? 90_000) / 2 }, opts.fetcher),
-    }));
+    const siteResults = await pool(siteKeys, 6, async (site) => {
+      // Himalayas is searched with your words and region, so its saved copy is kept per set of words.
+      const key = site === "himalayas" ? `site:himalayas:${country ?? ""}:${[...settings.titleWords].sort().join("|").toLowerCase()}` : `site:${site}`;
+      const hit = await readCache<Listing[]>(ctx.db, key, maxAge);
+      if (hit) return { site, res: { ok: true as const, listings: hit.value } };
+      const res = await fetchSite(site, { searchWords: settings.titleWords, country, deadline: tSites + (opts.siteBudgetMs ?? 90_000) / 2 }, fetcher);
+      // Keep only listings someone could want (their titles match anyone's words).
+      if (res.ok) await writeCache(ctx.db, key, res.listings.filter((l) => worthDescribing(l.title)));
+      return { site, res };
+    });
     const watchedNames = new Set(allBoards.map((b) => normalizeText(b.company)));
     const watchedKeys = new Set(allBoards.map((b) => b.key));
     const byCompany = new Map<string, { company: string; hints: Set<string>; listings: Listing[] }>();
@@ -694,10 +748,18 @@ export async function runDiscovery(
         report.notConfirmed!.push({ company: l.company, title: l.title, url: l.url, site: SITES[l.site].name, location: l.location });
     };
 
+    // Where each company's careers page is (or that none was found) is shared by everyone's searches.
     const probed = { ...(await getSetting<Record<string, { at: string; link: string | null }>>(ctx, K.probed, {})) };
+    const shared = await readCacheMany<{ link: string | null }>(ctx.db, [...byCompany.keys()].map((n) => `probe:${n}`), RETRY_DAYS * 86_400_000);
     const triedRecently = (name: string) => {
       const p = probed[name];
+      if (shared.get(`probe:${name}`)?.link === null) return true;
       return !!p && p.link === null && Date.parse(today) - Date.parse(p.at) < RETRY_DAYS * 86_400_000;
+    };
+    const knownBoard = (name: string) => {
+      const link = shared.get(`probe:${name}`)?.link;
+      const d = link ? detectBoard(link) : null;
+      return d ? [{ provider: d.provider, slug: d.slug, region: d.region }] : [];
     };
     const companies = [...byCompany.entries()];
     const toTry = companies.filter(([name]) => !triedRecently(name)).slice(0, MAX_COMPANIES_PER_SEARCH);
@@ -708,11 +770,11 @@ export async function runDiscovery(
     type Try = { name: string; e: (typeof toTry)[number][1]; hit: { ref: BoardRef; res: { company: string | null; postings: Posting[] } } | null; tried: boolean; watched?: boolean };
     const tries = await pool(toTry, 6, async ([name, e]): Promise<Try> => {
       if (Date.now() > deadline) return { name, e, hit: null, tried: false };
-      for (const ref of candidateBoards(e.company, [...e.hints])) {
+      for (const ref of [...knownBoard(name), ...candidateBoards(e.company, [...e.hints])]) {
         // Already watched under another name: this search already reads it, nothing to confirm.
         if (watchedKeys.has(boardKey(ref))) return { name, e, hit: null, tried: true, watched: true };
         if (Date.now() > deadline) return { name, e, hit: null, tried: false };
-        const res = await fetchBoard(ref, opts.fetcher);
+        const res = await getBoard(ref);
         if (!res.ok || !res.postings.length) continue;
         // The board must really list one of the jobs — a board that merely shares the name doesn't count.
         if (e.listings.some((l) => res.postings.some((p) => sameTitle(p.title, l.title)))) return { name, e, hit: { ref, res }, tried: true };
@@ -726,7 +788,10 @@ export async function runDiscovery(
       if (t.tried) report.companiesTried!++;
       if (t.watched) continue;
       if (!t.hit) {
-        if (t.tried) probed[t.name] = { at: today, link: null };
+        if (t.tried) {
+          probed[t.name] = { at: today, link: null };
+          await writeCache(ctx.db, `probe:${t.name}`, { link: null });
+        }
         t.e.listings.forEach(notConfirmed);
         continue;
       }
@@ -738,6 +803,7 @@ export async function runDiscovery(
       const site = SITES[t.e.listings[0].site].name;
       foundBoards.push({ link: boardLink(ref), company, site, at: today });
       probed[t.name] = { at: today, link: boardLink(ref) };
+      await writeCache(ctx.db, `probe:${t.name}`, { link: boardLink(ref) });
       report.companiesConfirmed!.push({ company, board: PROVIDER_NAMES[ref.provider], site });
       await logHistory(sys, {
         entityType: "setting",
@@ -754,6 +820,7 @@ export async function runDiscovery(
   report.finishedAt = new Date().toISOString();
   const total = Date.now() - started;
   report.timing = { boards: secs(fetchMs), sites: secs(sitesMs), saving: secs(total - fetchMs - sitesMs), total: secs(total), dbMs };
+  report.data = { downloadedKb: Math.round(counter.bytes() / 1024), boardsReused: reused, boardsDownloaded: fetched };
   // Internal bookkeeping (the summary shown on the page) — not an owner setting, so no permission or history entry.
   await saveInternal(ctx, K.last, report);
   const via = report.companiesConfirmed?.length ? `, ${report.companiesConfirmed.length} new companies found through remote-job sites` : "";

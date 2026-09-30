@@ -182,14 +182,57 @@ const iso = (v: unknown): string | null => {
 
 export type Fetcher = (url: string) => Promise<{ status: number; json: () => Promise<unknown>; text?: () => Promise<string> }>;
 
-export const defaultFetcher: Fetcher = async (url) => {
-  const res = await fetch(url, {
-    headers: { accept: "application/json, application/rss+xml;q=0.9", "user-agent": "ProspectCRM/1.0 (reads public job listings)" },
-    signal: AbortSignal.timeout(15_000),
-    cache: "no-store",
-  });
-  return { status: res.status, json: () => res.json(), text: () => res.text() };
-};
+export const defaultFetcher: Fetcher = countingFetcher().fetcher;
+
+/** A fetcher that also adds up how much it downloaded (so each search can say what it used). */
+export function countingFetcher(inner?: Fetcher): { fetcher: Fetcher; bytes: () => number } {
+  let bytes = 0;
+  const fetcher: Fetcher = async (url) => {
+    if (inner) {
+      const r = await inner(url);
+      return r;
+    }
+    const res = await fetch(url, {
+      headers: { accept: "application/json, application/rss+xml;q=0.9", "user-agent": "ProspectCRM/1.0 (reads public job listings)" },
+      signal: AbortSignal.timeout(15_000),
+      cache: "no-store",
+    });
+    // Read once, count it, then hand it out as JSON or text.
+    const body = res.status === 200 ? await res.text() : (await res.body?.cancel(), "");
+    bytes += body.length;
+    return { status: res.status, json: async () => JSON.parse(body) as unknown, text: async () => body };
+  };
+  return { fetcher, bytes: () => bytes };
+}
+
+/**
+ * The start of one job's description, for boards whose list leaves it out (Greenhouse, SmartRecruiters).
+ * One small request per job — used only for jobs actually being added.
+ */
+export async function fetchPostingSummary(board: BoardRef, postingId: string, fetcher: Fetcher = defaultFetcher): Promise<string | null> {
+  const slug = encodeURIComponent(board.slug);
+  const id = encodeURIComponent(postingId);
+  try {
+    if (board.provider === "greenhouse") {
+      const base = board.region === "eu" ? "https://boards-api.eu.greenhouse.io" : "https://boards-api.greenhouse.io";
+      const res = await fetcher(`${base}/v1/boards/${slug}/jobs/${id}`);
+      if (res.status !== 200) return null;
+      const r = (await res.json()) as { content?: string };
+      const html = typeof r.content === "string" ? r.content.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&") : null;
+      return plain(html);
+    }
+    if (board.provider === "smartrecruiters") {
+      const res = await fetcher(`https://api.smartrecruiters.com/v1/companies/${slug}/postings/${id}`);
+      if (res.status !== 200) return null;
+      const r = (await res.json()) as { jobAd?: { sections?: Record<string, { text?: string }> } };
+      const sec = r.jobAd?.sections ?? {};
+      return plain([sec.companyDescription?.text, sec.jobDescription?.text, sec.qualifications?.text].filter(Boolean).join("<p>"));
+    }
+  } catch {
+    // no description is fine — the listing link still works
+  }
+  return null;
+}
 
 /** HTML to readable plain text (shared with the remote-job site reader). */
 export const plainText = (html: string | null | undefined, max = 1500) => plain(html, max);
@@ -227,7 +270,8 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
       }
       case "greenhouse": {
         const base = board.region === "eu" ? "https://boards-api.eu.greenhouse.io" : "https://boards-api.greenhouse.io";
-        const res = await fetcher(`${base}/v1/boards/${slug}/jobs?content=true`);
+        // The list without descriptions is ~100x smaller; descriptions are fetched only for jobs being added.
+        const res = await fetcher(`${base}/v1/boards/${slug}/jobs`);
         if (res.status !== 200) return { ok: false, error: `board answered ${res.status}` };
         const body = (await res.json()) as { jobs?: Record<string, unknown>[] };
         if (!Array.isArray(body.jobs)) return { ok: false, error: "unexpected response" };
