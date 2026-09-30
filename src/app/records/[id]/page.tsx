@@ -11,9 +11,10 @@ import {
   sourceVerificationAction,
   updateRecordAction,
 } from "../../actions";
-import { CopyButton, SubmitButton } from "@/components/client";
+import { ApplicationSelect, CopyButton, SubmitButton } from "@/components/client";
 import {
   actorName,
+  APPLICATION_CHOICES,
   DECISION_NAMES,
   DECISION_STEP_TITLES,
   eventName,
@@ -22,7 +23,6 @@ import {
   humanize,
   listOf,
   LISTS,
-  OUTREACH_NAMES,
   SOURCE_NAMES,
   statusPhrase,
   TIER_NAMES,
@@ -95,7 +95,10 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           <p style={{ fontSize: "1.1rem", margin: ".1rem 0 .6rem" }}>
             <strong>{r.account}</strong>
           </p>
-          <StatusPill r={r} />
+          <div className="row" style={{ alignItems: "center", gap: ".8rem" }}>
+            <StatusPill r={r} />
+            <ApplicationSelect action={bind(outreachAction)} value={r.outreachStatus} choices={APPLICATION_CHOICES} />
+          </div>
         </div>
         {link && (
           <a className="button" href={/^https?:\/\//i.test(link) ? link : `https://${link}`} target="_blank" rel="noreferrer noopener">
@@ -109,50 +112,44 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
         <h2>What to do next</h2>
         {list === "ready" && (
           <>
-            {["not_started", "package_ready", "approved"].includes(r.outreachStatus) ? (
-              <>
-                <ol style={{ margin: ".2rem 0 .8rem", paddingLeft: "1.2rem" }}>
-                  <li>
-                    {r.preparedBrief || r.preparedAnswers ? (
-                      "Read the prepared brief and answers below (use the Copy buttons)."
-                    ) : answers.length ? (
-                      "Read about the job below. Use your saved answers below (Copy buttons) to fill in the application."
-                    ) : (
-                      <>
-                        Read about the job below. Tip: write your usual answers once on <Link href="/answers">My answers</Link>{" "}
-                        and they&apos;ll appear here with Copy buttons.
-                      </>
-                    )}
-                  </li>
-                  <li>Open the listing and apply yourself. This app never applies or sends anything for you.</li>
-                  <li>Come back and press &quot;I&apos;ve applied&quot; so you can keep track.</li>
-                </ol>
-                <form action={bind(outreachAction)}>
-                  <input type="hidden" name="status" value="sent_manually" />
-                  <input type="hidden" name="confirmed" value="yes" />
-                  <input type="hidden" name="reason" value="Marked as applied by you" />
-                  <SubmitButton confirm="Did you apply / send this yourself?">I&apos;ve applied / sent it</SubmitButton>
-                </form>
-              </>
-            ) : r.outreachStatus === "sent_manually" ? (
-              <>
-                <p>You&apos;ve applied. When they get back to you, record it here.</p>
-                <div className="row">
-                  <form action={bind(outreachAction)}>
-                    <input type="hidden" name="status" value="responded" />
-                    <input type="hidden" name="confirmed" value="yes" />
-                    <SubmitButton confirm="Did they reply to you?">They replied</SubmitButton>
-                  </form>
-                  <form action={bind(outreachAction)}>
-                    <input type="hidden" name="status" value="closed" />
-                    <SubmitButton className="">Close it (no longer pursuing)</SubmitButton>
-                  </form>
-                </div>
-              </>
-            ) : (
-              <p>
-                Application status: <strong>{OUTREACH_NAMES[r.outreachStatus]}</strong>. Add anything useful in Response
-                notes under Details.
+            <ol style={{ margin: ".2rem 0 .8rem", paddingLeft: "1.2rem" }}>
+              <li>
+                {r.preparedBrief || r.preparedAnswers ? (
+                  "Read the prepared brief and answers below (use the Copy buttons)."
+                ) : answers.length ? (
+                  "Read about the job below. Use your saved answers below (Copy buttons) to fill in the application."
+                ) : (
+                  <>
+                    Read about the job below. Tip: write your usual answers once on <Link href="/answers">My answers</Link> and
+                    they&apos;ll appear here with Copy buttons.
+                  </>
+                )}
+              </li>
+              <li>Open the listing and apply yourself. This app never applies or sends anything for you.</li>
+              <li>
+                Then set <strong>Your application</strong> (top of this page) to &quot;Applied&quot;. It moves to your Applied
+                list.
+              </li>
+            </ol>
+          </>
+        )}
+
+        {list === "applied" && (
+          <>
+            <p>
+              {r.outreachStatus === "sent_manually" &&
+                "You've applied. When they get back to you, change \"Your application\" at the top of this page."}
+              {r.outreachStatus === "responded" && "They got back to you. If it's an interview, set it to \"Interviewing\"."}
+              {r.outreachStatus === "interviewing" &&
+                "Interviewing — read the job and your prepared material again before each conversation. Note what was discussed in Response notes (Details)."}
+              {r.outreachStatus === "offer" && "Congratulations on the offer! Note the details in Response notes (Details)."}
+              {r.outreachStatus === "rejected" &&
+                "Not successful this time. It stays on your Applied list for your records — nothing is deleted."}
+              {r.outreachStatus === "closed" && "You withdrew or stopped. It stays on your Applied list for your records."}
+            </p>
+            {typeof r.attributes.appliedOn === "string" && (
+              <p className="small muted" style={{ margin: 0 }}>
+                Applied on {fmtDay(r.attributes.appliedOn)}.
               </p>
             )}
           </>

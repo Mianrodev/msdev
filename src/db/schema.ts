@@ -88,7 +88,7 @@ export const records = pgTable(
     lastVerifiedAt: text("last_verified_at"),
     responseNotes: text("response_notes"),
     outreachStatus: text("outreach_status", {
-      enum: ["not_started", "package_ready", "approved", "sent_manually", "responded", "closed"],
+      enum: ["not_started", "package_ready", "approved", "sent_manually", "responded", "interviewing", "offer", "rejected", "closed"],
     })
       .notNull()
       .default("not_started"),

@@ -123,6 +123,17 @@ loaded on every start.
      in New to review are left for you.
   3. Returns a counts-only summary (in vs out per stage, moved to Hold/Archive,
      active prospects by tier) and logs every change to History.
+- **Applied** (application tracker): every list and lead has a "Your
+  application" drop-down (Not applied yet → Applied → Heard back →
+  Interviewing → Offer / Not successful / Withdrew). Applied leads move to the
+  Applied list whatever happens to the listing; the first applied date is
+  kept. Only a signed-in person can set these (`core/permissions.ts`).
+- **Your AI** (`/connect`): a private link the owner adds to Claude as a custom
+  connector (Model Context Protocol, `src/app/api/mcp/[key]/route.ts`). Tools
+  (`src/services/ai-tools.ts`) read leads, the last search and saved answers,
+  and write prepared briefs/answers, notes and new leads — never decisions,
+  application statuses, rules or settings. Only a hash of the link's key is
+  stored; making a new link or switching it off stops the old one.
 - **My answers**: the owner's reusable application answers (intro, notice
   period, pay…), shown with Copy buttons on every Ready lead. Stored in
   settings, never exported, logged without their text.

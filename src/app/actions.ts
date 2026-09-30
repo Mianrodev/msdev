@@ -6,6 +6,7 @@ import { upsertAccount, setAccountStatus, updateAccount } from "@/services/accou
 import {
   archiveRecord,
   decideStage,
+  getRecord,
   holdRecord,
   listRecords,
   restoreRecord,
@@ -198,14 +199,22 @@ export async function fitTierAction(id: string, f: FormData) {
 
 export async function outreachAction(id: string, f: FormData) {
   const ctx = await getCtx();
-  await act(`/records/${id}`, async () => {
+  // The tracker drop-down on a list page sends you back to that list.
+  const back = str(f, "back");
+  const path = back.startsWith("/records?") ? back : `/records/${id}`;
+  await act(path, async () => {
     const to = str(f, "status") as OutreachStatus;
+    const before = await getRecord(ctx, id);
     await setOutreachStatus(ctx, id, to, {
-      // The quick buttons ask "Did you do this yourself?" before submitting.
+      // Buttons ask "Did you do this yourself?"; the drop-down is your own choice.
       humanConfirmed: f.get("confirm") === "on" || f.get("confirmed") === "yes",
       reason: str(f, "reason"),
     });
-    return `Saved: ${OUTREACH_NAMES[to]}.`;
+    const name = `${before.account} — ${before.opportunity}`;
+    if (to === "not_started") return `Saved: you haven't applied to ${name}.`;
+    if (to === "sent_manually") return `Saved: you applied to ${name}. It's now on your Applied list.`;
+    if (to === "offer") return `Congratulations! Saved: offer from ${before.account}.`;
+    return `Saved: ${name} — ${OUTREACH_NAMES[to]}.`;
   });
 }
 

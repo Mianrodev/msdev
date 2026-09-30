@@ -18,10 +18,31 @@ export default async function RulesPage({ searchParams }: { searchParams: Search
   return (
     <>
       <Flash sp={sp} />
-      <PageHeader
-        title="Rules"
-        intro="The automatic checks the weekly check uses to sort your leads. Change them any time — the next weekly check applies the new rules to every lead, including ones already Ready."
-      />
+      <PageHeader title="Settings" intro="Everything you set up once. Your rules are further down this page." />
+      <div className="tiles" style={{ marginBottom: "1.5rem" }}>
+        <Link className="tile" href="/import">
+          <div className="t">Upload spreadsheet</div>
+          <div className="d">Bring in (or update from) your Excel tracker.</div>
+        </Link>
+        <Link className="tile" href="/privacy">
+          <div className="t">Privacy</div>
+          <div className="d">Personal details that must never appear in anything you share.</div>
+        </Link>
+        <Link className="tile" href="/account">
+          <div className="t">Password</div>
+          <div className="d">Change your password and make a recovery code.</div>
+        </Link>
+        <Link className="tile" href="/discover">
+          <div className="t">What to look for</div>
+          <div className="d">The job titles, places and companies the search uses.</div>
+        </Link>
+      </div>
+
+      <h2 id="rules">Your rules</h2>
+      <p className="muted">
+        The automatic checks the weekly check uses to sort your leads. Change them any time — the next weekly check applies
+        the new rules to every lead, including ones already Ready.
+      </p>
 
       <h2>Automatic checks ({checks.filter((c) => c.enabled).length} switched on)</h2>
       <div className="help" style={{ marginBottom: ".8rem" }}>

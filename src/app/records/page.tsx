@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { fmtDay, LIST_TO_VIEW, LISTS, OUTREACH_NAMES, TIER_NAMES, type ListKey } from "@/components/plain";
+import { outreachAction } from "../actions";
+import { ApplicationSelect } from "@/components/client";
+import { APPLICATION_CHOICES, fmtDay, LIST_TO_VIEW, LISTS, TIER_NAMES, type ListKey } from "@/components/plain";
 import { Empty, Ext, Flash, one, PageHeader, StatusBadge, type SearchParams } from "@/components/ui";
 import type { RecordRow } from "@/db/schema";
 import { countsByView, listRecords, type SortKey } from "@/services/records";
@@ -8,8 +10,16 @@ import { getCtx } from "@/services/request";
 export const dynamic = "force-dynamic";
 
 const PAGE = 300;
-const LIST_ORDER: ListKey[] = ["review", "ready", "checking", "hold", "archive", "all"];
-const VIEW_TO_LIST: Record<string, ListKey> = { review: "review", prospects: "ready", leads: "checking", hold: "hold", archive: "archive", all: "all" };
+const LIST_ORDER: ListKey[] = ["review", "ready", "applied", "checking", "hold", "archive", "all"];
+const VIEW_TO_LIST: Record<string, ListKey> = {
+  review: "review",
+  prospects: "ready",
+  applied: "applied",
+  leads: "checking",
+  hold: "hold",
+  archive: "archive",
+  all: "all",
+};
 
 const SORTS: Record<string, { label: string; key: SortKey; dir: "asc" | "desc" }> = {
   recent: { label: "Recently changed", key: "updated", dir: "desc" },
@@ -23,6 +33,10 @@ type Col = { head: string; cell: (r: RecordRow) => React.ReactNode; className?: 
 const attr = (r: RecordRow, k: string) => (typeof r.attributes[k] === "string" ? (r.attributes[k] as string) : null);
 
 const COLS: Record<ListKey, Col[]> = {
+  applied: [
+    { head: "Applied on", cell: (r) => fmtDay(attr(r, "appliedOn")) },
+    { head: "Link", cell: (r) => <Ext href={r.nextStepUrl ?? r.sourceUrl} label="Open" /> },
+  ],
   review: [
     { head: "Where", cell: (r) => attr(r, "postingLocation") ?? r.location ?? "—", className: "why" },
     { head: "Pay (if listed)", cell: (r) => attr(r, "compensation") ?? "—", className: "why" },
@@ -32,7 +46,6 @@ const COLS: Record<ListKey, Col[]> = {
   ready: [
     { head: "Fit", cell: (r) => (r.fitTier ? TIER_NAMES[r.fitTier] : "—") },
     { head: "Effort to apply", cell: (r) => (typeof r.attributes.effortToApply === "string" ? r.attributes.effortToApply : "—") },
-    { head: "Application", cell: (r) => OUTREACH_NAMES[r.outreachStatus] },
     { head: "Link", cell: (r) => <Ext href={r.nextStepUrl ?? r.sourceUrl} label="Open" /> },
   ],
   checking: [
@@ -69,6 +82,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
   ]);
   const shown = rows.slice(0, limit);
   const countOf: Record<ListKey, number> = {
+    applied: counts.applied,
     review: counts.review,
     ready: counts.prospects,
     checking: counts.leads,
@@ -76,17 +90,21 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
     archive: counts.archive,
     all: counts.all,
   };
-  const href = (patch: Record<string, string | undefined>) => {
+  const here = href({});
+  function href(patch: Record<string, string | undefined>) {
     const p = new URLSearchParams();
     const merged = { list, q, sort: sortName, ...patch };
     for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
     return `/records?${p}`;
-  };
+  }
 
   return (
     <>
       <Flash sp={sp} />
-      <PageHeader title="Leads" intro="Every lead is on one of four lists. Click a list, then click a lead to open it.">
+      <PageHeader
+        title="Leads"
+        intro="Click a list, then click a lead to open it. Applied somewhere? Pick “Applied” in the last column and the lead moves to your Applied list."
+      >
         <Link className="button primary" href="/records/new">
           + Add a lead
         </Link>
@@ -134,6 +152,12 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
               New jobs appear here after a job board search. <Link href="/discover">Search now</Link> — it also runs every Monday.
             </p>
           )}
+          {list === "applied" && !q && (
+            <p className="muted">
+              When you apply for a job, pick &quot;Applied&quot; in the <strong>Applied?</strong> column of any list (or on the
+              lead&apos;s page). It moves here so you can track what happens next.
+            </p>
+          )}
           {list === "ready" && !q && (
             <p className="muted">
               Leads land here after they pass every check. Run the <Link href="/#weekly">weekly check</Link> to move leads along.
@@ -151,9 +175,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
                 <tr>
                   <th>Company</th>
                   <th>Opportunity</th>
+                  {list === "applied" && <th>Status</th>}
                   {COLS[list].map((c) => (
                     <th key={c.head}>{c.head}</th>
                   ))}
+                  {list !== "applied" && <th>Applied?</th>}
                 </tr>
               </thead>
               <tbody>
@@ -168,11 +194,21 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
                       <Link href={`/records/${r.id}`}>{r.opportunity}</Link>
                       {r.location && <div className="muted small">{r.location}</div>}
                     </td>
+                    {list === "applied" && (
+                      <td>
+                        <ApplicationSelect action={outreachAction.bind(null, r.id)} value={r.outreachStatus} choices={APPLICATION_CHOICES} back={here} compact />
+                      </td>
+                    )}
                     {COLS[list].map((c) => (
                       <td key={c.head} className={c.className}>
                         {c.cell(r)}
                       </td>
                     ))}
+                    {list !== "applied" && (
+                      <td>
+                        <ApplicationSelect action={outreachAction.bind(null, r.id)} value={r.outreachStatus} choices={APPLICATION_CHOICES} back={here} compact />
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

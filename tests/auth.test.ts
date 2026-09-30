@@ -39,7 +39,10 @@ describe("first-visit password setup", () => {
     const token = await newSessionToken(db);
     expect(await isValidSession(db, token)).toBe(true);
     expect(await isValidSession(db, await signSession("guess"))).toBe(false);
-    expect(await isValidSession(db, token.replace(/.$/, (c) => (c === "A" ? "B" : "A")))).toBe(false);
+    // Change a character in the middle of the signature (the last one can carry unused padding bits).
+    const i = token.length - 10;
+    const tampered = token.slice(0, i) + (token[i] === "A" ? "B" : "A") + token.slice(i + 1);
+    expect(await isValidSession(db, tampered)).toBe(false);
     expect(await isValidSession(db, `${Date.now() - 1}.${token.split(".")[1]}`)).toBe(false);
   });
 

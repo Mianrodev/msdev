@@ -17,11 +17,10 @@ const LINKS = [
   { href: "/records?list=ready", label: "Leads" },
   { href: "/answers", label: "My answers" },
   { href: "/accounts", label: "Companies" },
-  { href: "/import", label: "Upload" },
-  { href: "/privacy", label: "Privacy" },
-  { href: "/settings", label: "Rules" },
+  { href: "/connect", label: "Your AI" },
   { href: "/history", label: "Activity" },
   { href: "/help", label: "Help" },
+  { href: "/settings", label: "Settings", also: ["/import", "/privacy", "/account"] },
 ];
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -38,7 +37,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <>
                 <NavLinks links={LINKS} />
                 <span className="spacer" />
-                <NavLinks links={[{ href: "/account", label: "Password" }]} />
                 <form action={logoutAction}>
                   <button type="submit" className="small">
                     Sign out

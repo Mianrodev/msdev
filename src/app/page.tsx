@@ -50,6 +50,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   const tiles: { list: ListKey; n: number }[] = [
     { list: "review", n: counts.review },
     { list: "ready", n: counts.prospects },
+    { list: "applied", n: counts.applied },
     { list: "checking", n: counts.leads },
     { list: "hold", n: counts.hold },
     { list: "archive", n: counts.archive },
@@ -60,7 +61,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       <Flash sp={sp} />
       <PageHeader
         title="Home"
-        intro="The app finds new jobs for you every Monday. Say yes or no to the new ones, then apply to your Ready leads yourself."
+        intro="The app finds new jobs for you every Monday. Say yes or no to the new ones, apply to your Ready leads yourself, then track each application on your Applied list."
       />
 
       {!setup.allDone && (

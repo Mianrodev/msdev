@@ -92,10 +92,15 @@ export const OUTREACH_STATUSES = [
   "approved",
   "sent_manually",
   "responded",
+  "interviewing",
+  "offer",
+  "rejected",
   "closed",
 ] as const;
 export type OutreachStatus = (typeof OUTREACH_STATUSES)[number];
-export const HUMAN_ONLY_OUTREACH: readonly OutreachStatus[] = ["approved", "sent_manually", "responded"];
+export const HUMAN_ONLY_OUTREACH: readonly OutreachStatus[] = ["approved", "sent_manually", "responded", "interviewing", "offer", "rejected"];
+/** Statuses that mean "you've applied" — such leads live on the Applied list, whatever else happens to them. */
+export const APPLIED_OUTREACH: readonly OutreachStatus[] = ["sent_manually", "responded", "interviewing", "offer", "rejected"];
 
 export const TARGET_ACCOUNT_STATUSES = ["tracking", "hold", "archived"] as const;
 export type TargetAccountStatus = (typeof TARGET_ACCOUNT_STATUSES)[number];

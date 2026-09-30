@@ -6,13 +6,13 @@ import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 /** Top navigation with the current page highlighted. */
-export function NavLinks({ links }: { links: { href: string; label: string }[] }) {
+export function NavLinks({ links }: { links: { href: string; label: string; also?: string[] }[] }) {
   const path = usePathname();
   return (
     <>
       {links.map((l) => {
         const base = l.href.split("?")[0];
-        const on = base === "/" ? path === "/" : path.startsWith(base);
+        const on = base === "/" ? path === "/" : [base, ...(l.also ?? [])].some((b) => path.startsWith(b));
         return (
           <Link key={l.href} href={l.href} className={on ? "on" : undefined} aria-current={on ? "page" : undefined}>
             {l.label}
@@ -99,6 +99,87 @@ export function RecoveryCodeMaker({ make, hasCode }: { make: () => Promise<{ cod
         confirm={hasCode ? "Make a new recovery code? Your old code will stop working." : undefined}
       >
         {hasCode ? "Make a new recovery code" : "Make my recovery code"}
+      </SubmitButton>
+    </form>
+  );
+}
+
+/** The application tracker: pick a status and it saves straight away. */
+export function ApplicationSelect({
+  action,
+  value,
+  choices,
+  back,
+  label = "Your application",
+  compact = false,
+}: {
+  action: (f: FormData) => Promise<void>;
+  value: string;
+  choices: readonly (readonly [string, string])[];
+  back?: string;
+  label?: string;
+  compact?: boolean;
+}) {
+  const known = choices.some(([v]) => v === value);
+  return (
+    <form action={action} className={compact ? "app-select compact" : "app-select"}>
+      <input type="hidden" name="confirmed" value="yes" />
+      <input type="hidden" name="reason" value="Application status set by you" />
+      {back && <input type="hidden" name="back" value={back} />}
+      <label className={compact ? "sr-only-label" : undefined}>
+        <span className={compact ? "sr-only" : undefined}>{label}</span>
+        <AutoSubmitSelect name="status" defaultValue={known ? value : "not_started"} choices={choices} />
+      </label>
+    </form>
+  );
+}
+
+function AutoSubmitSelect({ name, defaultValue, choices }: { name: string; defaultValue: string; choices: readonly (readonly [string, string])[] }) {
+  const { pending } = useFormStatus();
+  return (
+    <select
+      name={name}
+      defaultValue={defaultValue}
+      disabled={pending}
+      aria-busy={pending}
+      onChange={(e) => e.currentTarget.form?.requestSubmit()}
+    >
+      {choices.map(([v, l]) => (
+        <option key={v} value={v}>
+          {pending ? "Saving…" : l}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** Makes the private "Connect your AI" link and shows it once. */
+export function AiLinkMaker({ make, on }: { make: () => Promise<{ code: string }>; on: boolean }) {
+  const [made, formAction] = useActionState(async () => make(), null);
+  if (made)
+    return (
+      <div className="note stack">
+        <strong>Your private AI link — copy it now</strong>
+        <div className="recovery-code" style={{ fontSize: "1rem" }}>
+          {made.code}
+        </div>
+        <div>
+          <CopyButton text={made.code} label="Copy the link" />
+        </div>
+        <p className="small" style={{ margin: 0 }}>
+          Paste it into Claude now (steps below). Treat it like a password: anyone with this link can read your tracker. It
+          won&apos;t be shown again — if you lose it, just make a new one.
+        </p>
+      </div>
+    );
+  return (
+    <form action={formAction}>
+      <SubmitButton
+        className={on ? "" : "primary"}
+        pending="Making your link…"
+        confirm={on ? "Make a new link? The old one stops working, so you'll need to update it in Claude." : undefined}
+      >
+        {on ? "Make a new link" : "Make my AI link"}
       </SubmitButton>
     </form>
   );

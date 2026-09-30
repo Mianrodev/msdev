@@ -2,12 +2,18 @@
  * Plain-English wording for everything the UI shows. One place, so every
  * screen uses the same words and nothing technical leaks through.
  */
+import { APPLIED_OUTREACH, type OutreachStatus } from "@/core/types";
 import type { RecordRow } from "@/db/schema";
 import type { DiscoveryReport } from "@/services/discovery";
 import type { RunSummary } from "@/services/run-update";
 
 /** The four lists a record can be on, in the words the UI uses. */
 export const LISTS = {
+  applied: {
+    title: "Applied",
+    short: "Applied",
+    help: "Everything you've applied to, and where each application stands. Change the status from the drop-down as you hear back.",
+  },
   review: {
     title: "New to review",
     short: "New to review",
@@ -43,6 +49,7 @@ export type ListKey = keyof typeof LISTS;
 
 /** URL/view names used by the records service. */
 export const LIST_TO_VIEW = {
+  applied: "applied",
   review: "review",
   ready: "prospects",
   checking: "leads",
@@ -96,10 +103,24 @@ export const OUTREACH_NAMES: Record<string, string> = {
   not_started: "Not started",
   package_ready: "Package ready",
   approved: "Approved by you",
-  sent_manually: "You applied / sent it",
-  responded: "They replied",
-  closed: "Closed",
+  sent_manually: "Applied",
+  responded: "Heard back",
+  interviewing: "Interviewing",
+  offer: "Offer",
+  rejected: "Not successful",
+  closed: "Withdrew / stopped",
 };
+
+/** The application tracker drop-down: what you can say about a lead, in order. */
+export const APPLICATION_CHOICES = [
+  ["not_started", "Not applied yet"],
+  ["sent_manually", "Applied"],
+  ["responded", "Heard back"],
+  ["interviewing", "Interviewing"],
+  ["offer", "Offer 🎉"],
+  ["rejected", "Not successful"],
+  ["closed", "Withdrew / stopped"],
+] as const;
 
 export const SOURCE_NAMES: Record<string, string> = {
   unverified: "Not checked yet",
@@ -108,7 +129,16 @@ export const SOURCE_NAMES: Record<string, string> = {
 };
 
 /** Which list a record is on. */
-export function listOf(r: Pick<RecordRow, "status" | "stage"> & { origin?: string }): ListKey {
+type ListInput = Pick<RecordRow, "status" | "stage"> & { origin?: string; outreachStatus?: string; attributes?: Record<string, unknown> };
+
+/** You've applied (or applied and then withdrew) — the lead lives on the Applied list. */
+export function applied(r: { outreachStatus?: string; attributes?: Record<string, unknown> }): boolean {
+  if (!r.outreachStatus) return false;
+  return APPLIED_OUTREACH.includes(r.outreachStatus as OutreachStatus) || (r.outreachStatus === "closed" && !!r.attributes && "appliedOn" in r.attributes);
+}
+
+export function listOf(r: ListInput): ListKey {
+  if (applied(r)) return "applied";
   if (r.status === "archived") return "archive";
   if (r.status === "hold") return "hold";
   if (r.stage === "verify") return "ready";
@@ -117,8 +147,9 @@ export function listOf(r: Pick<RecordRow, "status" | "stage"> & { origin?: strin
 }
 
 /** One short phrase describing where a record is. */
-export function whereItIs(r: Pick<RecordRow, "status" | "stage" | "fitTier"> & { origin?: string }): string {
+export function whereItIs(r: ListInput & Pick<RecordRow, "fitTier">): string {
   const list = listOf(r);
+  if (list === "applied") return r.outreachStatus === "sent_manually" ? "Applied" : `Applied — ${OUTREACH_NAMES[r.outreachStatus ?? ""]}`;
   if (list === "review") return "New — waiting for your review";
   if (list === "ready") return r.fitTier ? `Ready — ${TIER_NAMES[r.fitTier].toLowerCase()}` : "Ready";
   if (list === "checking") {
@@ -221,6 +252,7 @@ export function actorName(actor: string): string {
   if (actor.startsWith("system:run-update")) return "Weekly check";
   if (actor.startsWith("system:reconciliation")) return "Weekly check";
   if (actor.startsWith("system:job-board-search")) return "Job board search";
+  if (actor.startsWith("system:your-ai")) return "Your AI";
   if (actor.startsWith("import:")) return "Upload";
   if (actor.startsWith("system:")) return "The app";
   return actor;

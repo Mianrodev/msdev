@@ -173,8 +173,11 @@ function outreachFrom(s?: string): RecordRow["outreachStatus"] | null {
   const c = canon(s);
   if (!c) return null;
   if (/READY/.test(c)) return "package_ready";
+  if (/OFFER/.test(c)) return "offer";
+  if (/REJECT|DECLINED/.test(c)) return "rejected";
+  if (/INTERVIEW/.test(c)) return "interviewing";
   if (/APPLIED|SUBMITTED|SENT/.test(c)) return "sent_manually";
-  if (/RESPON|REPLIED|INTERVIEW/.test(c)) return "responded";
+  if (/RESPON|REPLIED/.test(c)) return "responded";
   if (/CLOSED/.test(c)) return "closed";
   return null;
 }

@@ -142,7 +142,7 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
         </div>
         <p className="muted small">
           Jobs listed as on-site or hybrid, or tied to a place that isn&apos;t yours, are skipped (your Remote-only and
-          region rules — change them on the <Link href="/settings">Rules</Link> page). A job that just says &quot;Remote&quot;
+          region rules — change them under <Link href="/settings#rules">Settings → Your rules</Link>). A job that just says &quot;Remote&quot;
           is kept for you to check.
         </p>
         <div>

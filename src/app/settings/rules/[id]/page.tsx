@@ -22,7 +22,7 @@ export default async function RulePage({ params, searchParams }: { params: Promi
   return (
     <>
       <Flash sp={sp} />
-      <BackLink href="/settings">Back to Rules</BackLink>
+      <BackLink href="/settings#rules">Back to your rules</BackLink>
       <PageHeader title={rule.label} intro={isNote ? rule.description : ruleSentence(rule)} />
       <div className="row" style={{ marginBottom: "1rem" }}>
         <span className={`pill ${rule.enabled ? "ready" : "archive"}`}>{rule.enabled ? "Switched on" : "Switched off"}</span>

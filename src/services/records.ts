@@ -10,6 +10,7 @@ import {
   FIT_TIERS,
   isUnknown,
   nextStage,
+  APPLIED_OUTREACH,
   OUTREACH_STATUSES,
   SOURCE_VERIFICATION,
   type DecisionStage,
@@ -422,13 +423,17 @@ export async function setOutreachStatus(
   ctx: Ctx,
   id: string,
   to: OutreachStatus,
-  opts: { humanConfirmed: boolean; reason?: string },
+  opts: { humanConfirmed: boolean; reason?: string; today?: string },
 ) {
   if (!OUTREACH_STATUSES.includes(to)) throw new Error("Invalid outreach status");
   assertOutreachChange(ctx.actor, to, opts.humanConfirmed);
   const r = await getRecord(ctx, id);
   if (r.outreachStatus === to) return r;
-  await ctx.db.update(records).set({ outreachStatus: to, updatedAt: nowIso() }).where(scope(ctx, id));
+  // Remember when you applied (kept if you later withdraw, cleared if you say you haven't applied after all).
+  const attributes = { ...r.attributes };
+  if (APPLIED_OUTREACH.includes(to) && !attributes.appliedOn) attributes.appliedOn = (opts.today ?? nowIso()).slice(0, 10);
+  if (to === "not_started" || to === "package_ready" || to === "approved") delete attributes.appliedOn;
+  await ctx.db.update(records).set({ outreachStatus: to, attributes, updatedAt: nowIso() }).where(scope(ctx, id));
   await logHistory(ctx, {
     entityType: "record",
     entityId: id,
@@ -445,6 +450,7 @@ export async function setOutreachStatus(
 
 export const VIEWS = {
   all: "All records",
+  applied: "Applied",
   review: "New to review",
   leads: "Leads (in pipeline)",
   prospects: "Prospects (qualified)",
@@ -478,26 +484,40 @@ export interface ListFilter {
   limit?: number;
 }
 
+/** You've applied (or applied and then withdrew). Such leads show on the Applied list only. */
+const APPLIED_SQL = sql`(${records.outreachStatus} in (${sql.join(
+  APPLIED_OUTREACH.map((s) => sql`${s}`),
+  sql`, `,
+)}) or (${records.outreachStatus} = 'closed' and (${records.attributes} ->> 'appliedOn') is not null))`;
+
 export function viewCondition(view: View): SQL | undefined {
+  const notApplied = sql`not ${APPLIED_SQL}`;
   switch (view) {
+    case "applied":
+      return APPLIED_SQL;
     case "review":
       // Jobs found automatically that passed the first look and wait for the owner's yes / hold / no.
-      return and(eq(records.status, "active"), eq(records.origin, "discovery"), sql`${records.stage} in ('discovery','screen')`);
+      return and(eq(records.status, "active"), eq(records.origin, "discovery"), sql`${records.stage} in ('discovery','screen')`, notApplied);
     case "leads":
       return and(
         eq(records.status, "active"),
         sql`${records.stage} <> 'verify'`,
         sql`not (${records.origin} = 'discovery' and ${records.stage} in ('discovery','screen'))`,
+        notApplied,
       );
     case "prospects":
-      return and(eq(records.status, "active"), eq(records.stage, "verify"));
+      return and(eq(records.status, "active"), eq(records.stage, "verify"), notApplied);
     case "hold":
-      return eq(records.status, "hold");
+      return and(eq(records.status, "hold"), notApplied);
     case "archive":
-      return eq(records.status, "archived");
+      return and(eq(records.status, "archived"), notApplied);
     default:
       return undefined;
   }
+}
+
+export function hasApplied(r: Pick<RecordRow, "outreachStatus" | "attributes">): boolean {
+  return APPLIED_OUTREACH.includes(r.outreachStatus) || (r.outreachStatus === "closed" && "appliedOn" in r.attributes);
 }
 
 export async function listRecords(ctx: Ctx, f: ListFilter = {}): Promise<RecordRow[]> {

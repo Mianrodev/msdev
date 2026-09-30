@@ -22,7 +22,8 @@ export default function HelpPage() {
           <li>
             Open your <Link href="/records?list=ready">Ready</Link> list. For each lead: open the listing, apply{" "}
             <em>yourself</em> (copy your usual answers from <Link href="/answers">My answers</Link> — they show on every
-            Ready lead), then press <strong>I&apos;ve applied</strong>.
+            Ready lead), then set <strong>Your application</strong> to &quot;Applied&quot;. As you hear back, change it
+            (Heard back, Interviewing, Offer…) on your <Link href="/records?list=applied">Applied</Link> list.
           </li>
           <li>
             Found something elsewhere? <Link href="/records/new">Add it by hand</Link>. Want the app to watch a new company?
@@ -31,9 +32,9 @@ export default function HelpPage() {
         </ol>
       </section>
 
-      <h2>What the four lists mean</h2>
+      <h2>What the lists mean</h2>
       <div className="tiles">
-        {(["review", "ready", "checking", "hold", "archive"] as const).map((l) => (
+        {(["review", "ready", "applied", "checking", "hold", "archive"] as const).map((l) => (
           <Link key={l} className={`tile ${l}`} href={`/records?list=${l}`}>
             <div className="t">{LISTS[l].title}</div>
             <div className="d">{LISTS[l].help}</div>
@@ -61,7 +62,7 @@ export default function HelpPage() {
           <h3>What does the weekly search actually do?</h3>
           <p>
             It searches for new jobs, checks whether listings are still open, and checks every lead against your{" "}
-            <Link href="/settings">Rules</Link>. A lead that clearly fails a rule (or whose listing has closed) is archived;
+            <Link href="/settings#rules">rules</Link> (under Settings). A lead that clearly fails a rule (or whose listing has closed) is archived;
             one that needs a closer look goes on hold; new jobs wait for your Yes / No. Being Ready once isn&apos;t
             permanent — Ready leads are re-checked every week.
           </p>
@@ -122,6 +123,23 @@ export default function HelpPage() {
           </p>
         </div>
         <div className="card">
+          <h3>I applied somewhere — how do I track it?</h3>
+          <p>
+            Every lead has a <strong>Your application</strong> drop-down (on its page, and in the last column of every list).
+            Pick &quot;Applied&quot; and it moves to your <Link href="/records?list=applied">Applied</Link> list with
+            today&apos;s date. Change it as things happen: Heard back, Interviewing, Offer, Not successful. Applied somewhere
+            that isn&apos;t in the app yet? <Link href="/records/new">Add it by hand</Link> first.
+          </p>
+        </div>
+        <div className="card">
+          <h3>Can my own AI (Claude) help?</h3>
+          <p>
+            Yes. On <Link href="/connect">Your AI</Link>, make a private link and add it to Claude as a connector. Claude can
+            then read your leads, write cover letters and answers onto them, add notes and add jobs it finds — using your own
+            Claude plan. It can never apply, contact anyone, or decide for you.
+          </p>
+        </div>
+        <div className="card">
           <h3>I forgot my password. What now?</h3>
           <p>
             On the sign-in page, press <strong>Forgot your password?</strong>, type your recovery code and choose a new
@@ -132,8 +150,8 @@ export default function HelpPage() {
         <div className="card">
           <h3>How do I change my password?</h3>
           <p>
-            Open <Link href="/account">Password</Link> (top right, next to Sign out). That&apos;s also where you make your
-            recovery code.
+            Open <Link href="/settings">Settings</Link> → <Link href="/account">Password</Link>. That&apos;s also where you
+            make your recovery code.
           </p>
         </div>
       </div>

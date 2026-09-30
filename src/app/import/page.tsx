@@ -77,7 +77,7 @@ export default async function UploadPage({ searchParams }: { searchParams: Searc
       <h2>What happens</h2>
       <ul>
         <li>Each lead from your sheets (Priority, Raw leads, Hold, Archive) goes to the right list here.</li>
-        <li>Target accounts become <Link href="/accounts">Companies</Link>, your History sheet goes into the Activity log, and your hidden CONFIG rules become your <Link href="/settings">Rules</Link>.</li>
+        <li>Target accounts become <Link href="/accounts">Companies</Link>, your History sheet goes into the Activity log, and your hidden CONFIG rules become your <Link href="/settings#rules">rules</Link>.</li>
         <li>If the same lead appears on several sheets, it becomes one lead — not duplicates.</li>
         <li>Uploading a newer version later is fine: existing leads are updated in place.</li>
       </ul>
