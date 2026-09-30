@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import {
   archiveAction,
   decideAction,
+  reviewAction,
   fitTierAction,
   holdAction,
   outreachAction,
@@ -33,6 +34,16 @@ import { evaluateRecord, getRecord, NotFoundError, pendingDecision } from "@/ser
 import { getCtx } from "@/services/request";
 
 export const dynamic = "force-dynamic";
+
+const JOB_FACTS: [string, string][] = [
+  ["postingLocation", "Location on the listing"],
+  ["openToYourRegion", "Open to your region?"],
+  ["workplaceType", "Remote / office"],
+  ["employmentType", "Type"],
+  ["compensation", "Pay (as listed)"],
+  ["postedOn", "Posted"],
+  ["foundOn", "Found on"],
+];
 
 export default async function LeadPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
   const { id } = await params;
@@ -97,7 +108,11 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             {["not_started", "package_ready", "approved"].includes(r.outreachStatus) ? (
               <>
                 <ol style={{ margin: ".2rem 0 .8rem", paddingLeft: "1.2rem" }}>
-                  <li>Read the prepared brief and answers below (use the Copy buttons).</li>
+                  <li>
+                    {r.preparedBrief || r.preparedAnswers
+                      ? "Read the prepared brief and answers below (use the Copy buttons)."
+                      : "Read about the job below. There's no prepared cover letter yet — write your own, or add one under Edit details."}
+                  </li>
                   <li>Open the listing and apply yourself. This app never applies or sends anything for you.</li>
                   <li>Come back and press &quot;I&apos;ve applied&quot; so you can keep track.</li>
                 </ol>
@@ -129,6 +144,34 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                 notes under Details.
               </p>
             )}
+          </>
+        )}
+
+        {list === "review" && (
+          <>
+            <p>
+              The app found this job on {r.account}&apos;s job board and it passes your rules. Read about it below (or open the
+              listing), then decide:
+            </p>
+            <div className="row" style={{ marginTop: ".6rem" }}>
+              {(
+                [
+                  ["yes", "Yes — worth applying", "primary"],
+                  ["hold", "Not sure — hold", ""],
+                  ["no", "No — not for me", "danger"],
+                ] as const
+              ).map(([choice, label, cls]) => (
+                <form key={choice} action={bind(reviewAction)}>
+                  <input type="hidden" name="choice" value={choice} />
+                  <SubmitButton className={cls} pending="Saving…">
+                    {label}
+                  </SubmitButton>
+                </form>
+              ))}
+            </div>
+            <p className="small muted" style={{ marginTop: ".6rem" }}>
+              &quot;Yes&quot; moves it to Ready. You still apply yourself — the app never applies for you.
+            </p>
           </>
         )}
 
@@ -202,6 +245,28 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           </>
         )}
       </section>
+
+      {/* ---------------- About this job (found automatically) ---------------- */}
+      {(r.origin === "discovery" || typeof r.extra.postingSummary === "string") && (
+        <section className="card" style={{ marginBottom: "1rem" }}>
+          <h2>About this job</h2>
+          <dl className="kv">
+            {JOB_FACTS.filter(([k]) => typeof r.attributes[k] === "string").map(([k, label]) => (
+              <div key={k} style={{ display: "contents" }}>
+                <dt>{label}</dt>
+                <dd>{k === "postedOn" ? fmtDay(r.attributes[k] as string) : String(r.attributes[k])}</dd>
+              </div>
+            ))}
+          </dl>
+          {typeof r.extra.postingSummary === "string" && (
+            <>
+              <h3>What the listing says (start)</h3>
+              <div className="package">{r.extra.postingSummary}</div>
+            </>
+          )}
+          <p className="small muted">Taken word for word from the company&apos;s job board. Open the listing for the full text.</p>
+        </section>
+      )}
 
       {/* ---------------- Prepared package ---------------- */}
       {(r.preparedBrief || r.preparedAnswers) && (

@@ -13,6 +13,7 @@ export const metadata: Metadata = {
 
 const LINKS = [
   { href: "/", label: "Home" },
+  { href: "/discover", label: "Find leads" },
   { href: "/records?list=ready", label: "Leads" },
   { href: "/accounts", label: "Companies" },
   { href: "/import", label: "Upload" },

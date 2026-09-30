@@ -4,7 +4,8 @@ import nextTs from "eslint-config-next/typescript";
 /**
  * Besides Next's defaults, this enforces the research-only boundary in code:
  * application source may not make outbound network calls or send mail. The
- * app prepares packages; a human sends them.
+ * app prepares packages; a human sends them. The single exception is
+ * src/sources/job-boards.ts, which only GETs public job listings.
  */
 const OUTBOUND = "The app never contacts anyone or submits anything (see src/core/permissions.ts).";
 
@@ -23,6 +24,7 @@ const config = [
   },
   {
     files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/sources/job-boards.ts"],
     rules: {
       "no-restricted-globals": ["error", { name: "fetch", message: OUTBOUND }, { name: "XMLHttpRequest", message: OUTBOUND }, { name: "WebSocket", message: OUTBOUND }],
       "no-restricted-imports": [

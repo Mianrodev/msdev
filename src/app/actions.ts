@@ -7,6 +7,7 @@ import {
   archiveRecord,
   decideStage,
   holdRecord,
+  listRecords,
   restoreRecord,
   setFitTier,
   setOutreachStatus,
@@ -17,7 +18,8 @@ import {
 } from "@/services/records";
 import { runReconciliation } from "@/services/reconcile";
 import { runUpdate } from "@/services/run-update";
-import { humanize, OUTREACH_NAMES, SOURCE_NAMES, whereItIs } from "@/components/plain";
+import { describeSearch, humanize, OUTREACH_NAMES, SOURCE_NAMES, whereItIs } from "@/components/plain";
+import { addBoard, reviewFoundJob, runDiscovery, saveDiscoveryWords, setBoardEnabled } from "@/services/discovery";
 import { savePrivacy, PRIVACY_FIELDS, type PrivacyDetails } from "@/services/privacy";
 import { createRule, IDENTITY_TERMS_KEY, setRuleEnabled, setSetting, updateRule } from "@/services/rules";
 import { getCtx } from "@/services/request";
@@ -362,5 +364,83 @@ export async function privacyAction(f: FormData) {
     return n
       ? `Saved. ${n} words and phrases are now hidden from anything you share or download as a shared copy.`
       : "Saved. Nothing is being hidden yet — fill in at least your name.";
+  });
+}
+
+// ---------------------------------------------------------------- finding leads
+
+/** Search the job boards, then run the weekly check. Returns to the page it was pressed on. */
+export async function findLeadsAction(f: FormData) {
+  const ctx = await getCtx();
+  const back = str(f, "back") === "/discover" ? "/discover" : "/";
+  await act(back, async () => {
+    const search = await runDiscovery(ctx);
+    await runUpdate(ctx);
+    return [
+      search.newLeads ? `Search finished — ${search.newLeads} new jobs to review.` : "Search finished — no new matching jobs this time.",
+      ...describeSearch(search).slice(2),
+    ].join("\n");
+  });
+}
+
+export async function reviewAction(id: string, f: FormData) {
+  const ctx = await getCtx();
+  const choice = str(f, "choice") as "yes" | "hold" | "no";
+  let nextId: string | undefined;
+  await act(
+    `/records/${id}`,
+    async () => {
+      const r = await reviewFoundJob(ctx, id, choice);
+      // Take the owner straight to the next job waiting for review.
+      nextId = (await listRecords(ctx, { view: "review", sort: "account", dir: "asc", limit: 1 }))[0]?.id;
+      return choice === "yes"
+        ? `Moved to Ready (${whereItIs(r)}). Open it from the Ready list when you're ready to apply.`
+        : choice === "hold"
+          ? "Put on hold."
+          : "Archived — you won't see this job again.";
+    },
+    (msg) => withMessage(nextId ? `/records/${nextId}` : "/records?list=review", "ok", `${msg as string}${nextId ? " Here's the next one." : " That was the last one to review."}`),
+  );
+}
+
+const lines = (f: FormData, k: string) =>
+  str(f, k)
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+export async function discoveryWordsAction(f: FormData) {
+  const ctx = await getCtx();
+  await act("/discover", async () => {
+    const words = {
+      titleWords: lines(f, "titleWords"),
+      skipWords: lines(f, "skipWords"),
+      regionWords: lines(f, "regionWords"),
+      otherRegionWords: lines(f, "otherRegionWords"),
+    };
+    if (!words.titleWords.length) throw new Error("Please add at least one job title word to look for.");
+    await saveDiscoveryWords(ctx, words);
+    return "Saved. The next search will use these words.";
+  });
+}
+
+export async function addBoardAction(f: FormData) {
+  const ctx = await getCtx();
+  await act("/discover", async () => {
+    const b = await addBoard(ctx, str(f, "link"));
+    if (!b) {
+      throw new Error(
+        "That link isn't a job board the app can read yet. Paste a careers link from Lever (jobs.lever.co/…), Greenhouse (job-boards.greenhouse.io/…), Ashby (jobs.ashbyhq.com/…) or Workable (apply.workable.com/…).",
+      );
+    }
+    return `Added. The next search will include this company's jobs.`;
+  });
+}
+
+export async function toggleBoardAction(key: string, on: boolean) {
+  const ctx = await getCtx();
+  await act("/discover", async () => {
+    await setBoardEnabled(ctx, key, on);
+    return on ? "Company switched on." : "Company switched off — its jobs won't be searched.";
   });
 }

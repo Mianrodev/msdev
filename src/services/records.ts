@@ -445,6 +445,7 @@ export async function setOutreachStatus(
 
 export const VIEWS = {
   all: "All records",
+  review: "New to review",
   leads: "Leads (in pipeline)",
   prospects: "Prospects (qualified)",
   hold: "Hold",
@@ -479,8 +480,15 @@ export interface ListFilter {
 
 export function viewCondition(view: View): SQL | undefined {
   switch (view) {
+    case "review":
+      // Jobs found automatically that passed the first look and wait for the owner's yes / hold / no.
+      return and(eq(records.status, "active"), eq(records.origin, "discovery"), sql`${records.stage} in ('discovery','screen')`);
     case "leads":
-      return and(eq(records.status, "active"), sql`${records.stage} <> 'verify'`);
+      return and(
+        eq(records.status, "active"),
+        sql`${records.stage} <> 'verify'`,
+        sql`not (${records.origin} = 'discovery' and ${records.stage} in ('discovery','screen'))`,
+      );
     case "prospects":
       return and(eq(records.status, "active"), eq(records.stage, "verify"));
     case "hold":

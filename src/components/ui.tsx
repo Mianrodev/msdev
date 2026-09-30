@@ -41,11 +41,11 @@ export function PageHeader({ title, intro, children }: { title: string; intro?: 
   );
 }
 
-export function StatusPill({ r }: { r: Pick<RecordRow, "status" | "stage" | "fitTier"> }) {
+export function StatusPill({ r }: { r: Pick<RecordRow, "status" | "stage" | "fitTier" | "origin"> }) {
   return <span className={`pill ${listOf(r)}`}>{whereItIs(r)}</span>;
 }
 
-export function StatusBadge({ r }: { r: Pick<RecordRow, "status" | "stage" | "fitTier"> }) {
+export function StatusBadge({ r }: { r: Pick<RecordRow, "status" | "stage" | "fitTier" | "origin"> }) {
   return <span className={`badge ${listOf(r)}`}>{whereItIs(r)}</span>;
 }
 

@@ -83,6 +83,9 @@ export async function runUpdate(ctx: Ctx): Promise<RunSummary> {
     for (const stage of ["screen", "triage", "verify"] as const) {
       const counts: StageCounts = { in: 0, advanced: 0, held: 0, archived: 0 };
       for (const r of await scoped(STAGE_FROM[stage])) {
+        // Jobs found automatically get the automatic first look, then wait for the owner's review
+        // (the "New to review" list) rather than being promoted by rules alone.
+        if (stage !== "screen" && r.origin === "discovery" && r.stage === "screen") continue;
         counts.in++;
         const evaluation = await evaluateRecord(sys, r, stage);
         const verdict = suggestVerdict(stage, evaluation, r.sourceVerification)!;

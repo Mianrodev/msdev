@@ -8,7 +8,8 @@
  * actors and are refused those capabilities.
  *
  * The companion ESLint rule (eslint.config.mjs) forbids outbound network
- * primitives in src/, so the boundary also holds at the code level.
+ * primitives in src/, so the boundary also holds at the code level. The one
+ * exception, src/sources/job-boards.ts, only reads public job listings.
  */
 import { HUMAN_ONLY_OUTREACH, type Actor, type OutreachStatus } from "./types";
 

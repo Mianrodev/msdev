@@ -3,10 +3,16 @@
  * screen uses the same words and nothing technical leaks through.
  */
 import type { RecordRow } from "@/db/schema";
+import type { DiscoveryReport } from "@/services/discovery";
 import type { RunSummary } from "@/services/run-update";
 
 /** The four lists a record can be on, in the words the UI uses. */
 export const LISTS = {
+  review: {
+    title: "New to review",
+    short: "New to review",
+    help: "Jobs the app found on company job boards that passed your rules. Open each one and choose Yes, Not sure or No.",
+  },
   ready: {
     title: "Ready",
     short: "Ready",
@@ -37,6 +43,7 @@ export type ListKey = keyof typeof LISTS;
 
 /** URL/view names used by the records service. */
 export const LIST_TO_VIEW = {
+  review: "review",
   ready: "prospects",
   checking: "leads",
   hold: "hold",
@@ -101,15 +108,18 @@ export const SOURCE_NAMES: Record<string, string> = {
 };
 
 /** Which list a record is on. */
-export function listOf(r: Pick<RecordRow, "status" | "stage">): ListKey {
+export function listOf(r: Pick<RecordRow, "status" | "stage"> & { origin?: string }): ListKey {
   if (r.status === "archived") return "archive";
   if (r.status === "hold") return "hold";
-  return r.stage === "verify" ? "ready" : "checking";
+  if (r.stage === "verify") return "ready";
+  if (r.origin === "discovery" && (r.stage === "discovery" || r.stage === "screen")) return "review";
+  return "checking";
 }
 
 /** One short phrase describing where a record is. */
-export function whereItIs(r: Pick<RecordRow, "status" | "stage" | "fitTier">): string {
+export function whereItIs(r: Pick<RecordRow, "status" | "stage" | "fitTier"> & { origin?: string }): string {
   const list = listOf(r);
+  if (list === "review") return "New — waiting for your review";
   if (list === "ready") return r.fitTier ? `Ready — ${TIER_NAMES[r.fitTier].toLowerCase()}` : "Ready";
   if (list === "checking") {
     return r.stage === "discovery" ? "New — not checked yet" : `Being checked (${STEP_NAMES[r.stage].toLowerCase()})`;
@@ -194,6 +204,7 @@ export function eventName(event: string): string {
     reconcile: "Re-checked by weekly check",
     run: "Re-check run",
     run_update: "Weekly check run",
+    job_board_search: "Job boards searched",
     "import.state": "Imported",
     "import.history.reconciliation": "Old history (from spreadsheet)",
     "import.history.activity_log": "Old activity (from spreadsheet)",
@@ -208,6 +219,7 @@ export function actorName(actor: string): string {
   if (actor.startsWith("human:")) return "You";
   if (actor.startsWith("system:run-update")) return "Weekly check";
   if (actor.startsWith("system:reconciliation")) return "Weekly check";
+  if (actor.startsWith("system:job-board-search")) return "Job board search";
   if (actor.startsWith("import:")) return "Upload";
   if (actor.startsWith("system:")) return "The app";
   return actor;
@@ -219,4 +231,21 @@ export function statusPhrase(s: string | null | undefined): string {
   const m = s.match(/^(discovery|screen|triage|verify)\/(active|hold|archived)$/);
   if (m) return whereItIs({ stage: m[1] as RecordRow["stage"], status: m[2] as RecordRow["status"], fitTier: null });
   return OUTREACH_NAMES[s] ?? SOURCE_NAMES[s] ?? TIER_NAMES[s] ?? humanize(s);
+}
+
+/** The job board search result as a few short, plain sentences. */
+export function describeSearch(d: DiscoveryReport): string[] {
+  const lines = [
+    `Searched ${plural(d.boardsChecked, "company job board")} (${d.jobsSeen.toLocaleString("en-GB")} open jobs).`,
+    d.newLeads
+      ? `Found ${plural(d.newLeads, "new job")} matching your words and rules — they're in New to review.`
+      : "No new matching jobs this time.",
+  ];
+  if (d.filteredOut) lines.push(`Skipped ${plural(d.filteredOut, "matching job")} that fail your rules (on-site or another region).`);
+  if (d.stillOpen || d.closed) {
+    lines.push(`Checked your leads' links: ${d.stillOpen} still open, ${d.closed} no longer listed (closed).`);
+  }
+  if (d.capped) lines.push("There were more new jobs than one search adds — the rest will come in next time.");
+  if (d.boardsFailed.length) lines.push(`${plural(d.boardsFailed.length, "board")} couldn't be read this time (see Find leads).`);
+  return lines;
 }

@@ -88,19 +88,32 @@ loaded on every start.
 
 ## Using it
 
-- **Run update** (dashboard) is the weekly workflow; it replaces the workbook's
+- **Find new leads** (Home, or the *Find leads* page) searches the public job
+  boards (Lever, Greenhouse, Ashby, Workable) of every company in your tracker,
+  plus any careers link you add. It is free: no API key, no AI. It:
+  1. Checks whether each active or held lead's listing is still on its board
+     (sets *Verified open* and the source verification).
+  2. Adds new jobs whose title matches your words, skips titles with a skip
+     word, and drops jobs that fail your screen rules (on-site/hybrid, or only
+     open to another region). New jobs land in **New to review**, where you
+     press Yes / Not sure / No. Yes moves the job through to Ready.
+  3. Runs the weekly update below.
+
+  It also runs by itself every Monday at 08:00 India time through Vercel Cron
+  (`vercel.json` → `/api/cron/weekly`). Set `CRON_SECRET` in Vercel to lock
+  that address down; without it only Vercel's scheduler may call it.
+  LinkedIn and other sites can't be searched this way. Add those leads by hand.
+- **Run update** is the weekly sorting step. It replaces the workbook's
   "Update this week's prospect tracker" trigger. In one transaction it:
   1. Reconciles every existing prospect and held record against the *current*
      rules. A prospect that no longer qualifies moves to Archive (genuine
      violation) or Hold (needs review / unverified source). Qualifying once is
      not a permanent pass.
   2. Runs every pending record through Screen → Triage → Verify, applying the
-     stored rules and writing a verdict + reason at each stage.
+     stored rules and writing a verdict + reason at each stage. Jobs waiting
+     in New to review are left for you.
   3. Returns a counts-only summary (in vs out per stage, moved to Hold/Archive,
      active prospects by tier) and logs every change to History.
-
-  It is manual-only for v1. `runUpdate()` in `src/services/run-update.ts` is a
-  plain function, so a scheduler can call it later.
 - **Records**: list, filter and sort by view (Leads / Prospects / Hold /
   Archive), stage, status and tier, or search. Open a record to edit it, make
   the next stage decision (a reason is always required), hold, archive or
@@ -122,7 +135,7 @@ loaded on every start.
 | Dedup on (account, opportunity, URL) | Unique index plus in-place update, logged as `dedup_merge`. URLs and company names are normalised (`core/dedup.ts`). |
 | Reconciliation every run | `services/reconcile.ts`, called first by Run update. |
 | Nothing hard-deleted; every change logged | Postgres triggers block `DELETE`/`TRUNCATE` on records, accounts and rules, and any `UPDATE`/`DELETE`/`TRUNCATE` on history (`drizzle/0001_append_only.sql`). |
-| Research only, never acts | Permission layer: no send/submit capability exists; human-only outreach states need a human actor plus explicit confirmation (`core/permissions.ts`). ESLint forbids `fetch`/`http`/mail libraries in `src/`. |
+| Research only, never acts | Permission layer: no send/submit capability exists; human-only outreach states need a human actor plus explicit confirmation (`core/permissions.ts`). ESLint forbids `fetch`/`http`/mail libraries in `src/`, except the read-only job-board reader `src/sources/job-boards.ts` (GET requests to public job listings only). |
 | No identity leakage | Every exported field is classified (unclassified = restricted), and shared exports are scrubbed (`core/redaction.ts`). Contacts live only in labelled contact fields, never in the dedup key. |
 
 ### Criteria derived from CONFIG
@@ -148,6 +161,7 @@ src/core/       pure domain logic (no DB): rules, pipeline, dedup, permissions, 
 src/db/         Drizzle schema + Postgres client (Neon/any Postgres online, embedded PGlite locally)
 src/lib/        sign-in: first-visit password setup, scrypt hash, signed session cookie
 src/proxy.ts    requires sign-in for every request
+src/sources/    read-only public job-board reader (the only code allowed to go online)
 src/services/   workspace-scoped persistence; every change writes History
 src/app/        Next.js UI (server components + server actions) and CSV export routes
 scripts/        migrate, workbook import (also used by the Import page), fixture generator

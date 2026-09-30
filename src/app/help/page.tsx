@@ -8,30 +8,31 @@ export default function HelpPage() {
       <PageHeader title="Help" intro="Everything you need to know, in plain words." />
 
       <section className="card">
-        <h2>Your weekly routine (5 minutes)</h2>
+        <h2>Your weekly routine (10 minutes)</h2>
         <ol>
           <li>
-            <strong>Add new leads</strong> as you find them (<Link href="/records/new">Add a lead</Link>), or upload an updated
-            spreadsheet on the <Link href="/import">Upload</Link> page.
+            <strong>Every Monday the app searches for you.</strong> It reads the job boards of every company you&apos;re
+            tracking, adds new jobs that match your words and rules, and checks whether your leads&apos; listings are still
+            open. (You can also press <strong>Find new leads</strong> on the <Link href="/">Home</Link> page any time.)
           </li>
           <li>
-            On the <Link href="/">Home</Link> page, press <strong>Run weekly check</strong>. It sorts new leads and re-checks
-            the ones you already have.
+            Open <Link href="/records?list=review">New to review</Link>. For each job, read about it and press{" "}
+            <strong>Yes</strong>, <strong>Not sure</strong> or <strong>No</strong>. The next one opens automatically.
           </li>
           <li>
-            Open your <Link href="/records?list=ready">Ready</Link> list. For each lead: read the prepared brief and answers,
-            open the listing, apply <em>yourself</em>, then press <strong>I&apos;ve applied</strong>.
+            Open your <Link href="/records?list=ready">Ready</Link> list. For each lead: open the listing, apply{" "}
+            <em>yourself</em>, then press <strong>I&apos;ve applied</strong>.
           </li>
           <li>
-            Glance at <Link href="/records?list=hold">On hold</Link>. Each one says what information is missing. When you
-            have it, update the lead and press <strong>Put it back</strong>.
+            Found something elsewhere? <Link href="/records/new">Add it by hand</Link>. Want the app to watch a new company?
+            Paste its careers link on <Link href="/discover">Find leads</Link>.
           </li>
         </ol>
       </section>
 
       <h2>What the four lists mean</h2>
       <div className="tiles">
-        {(["ready", "checking", "hold", "archive"] as const).map((l) => (
+        {(["review", "ready", "checking", "hold", "archive"] as const).map((l) => (
           <Link key={l} className={`tile ${l}`} href={`/records?list=${l}`}>
             <div className="t">{LISTS[l].title}</div>
             <div className="d">{LISTS[l].help}</div>
@@ -56,11 +57,12 @@ export default function HelpPage() {
           </p>
         </div>
         <div className="card">
-          <h3>What does the weekly check actually do?</h3>
+          <h3>What does the weekly search actually do?</h3>
           <p>
-            It checks every lead against your <Link href="/settings">Rules</Link>. A lead that clearly fails a rule is
-            archived; one that needs a closer look goes on hold; one that passes every step becomes Ready. It also re-checks
-            leads that were Ready before — being Ready once isn&apos;t permanent.
+            It searches for new jobs, checks whether listings are still open, and checks every lead against your{" "}
+            <Link href="/settings">Rules</Link>. A lead that clearly fails a rule (or whose listing has closed) is archived;
+            one that needs a closer look goes on hold; new jobs wait for your Yes / No. Being Ready once isn&apos;t
+            permanent — Ready leads are re-checked every week.
           </p>
         </div>
         <div className="card">
@@ -68,6 +70,21 @@ export default function HelpPage() {
           <p>
             Usually because nobody has confirmed the listing is still open. Open the lead, check the link, set &quot;Is the
             link still open?&quot; to &quot;Checked — still open&quot;, then press Put it back.
+          </p>
+        </div>
+        <div className="card">
+          <h3>Where do new jobs come from?</h3>
+          <p>
+            From the public job boards (Lever, Greenhouse, Ashby, Workable) of the companies in your tracker, plus any you add
+            on <Link href="/discover">Find leads</Link>. It costs nothing and uses no AI. Jobs on LinkedIn or other sites
+            can&apos;t be searched automatically — add those by hand.
+          </p>
+        </div>
+        <div className="card">
+          <h3>Why was a job I expected not added?</h3>
+          <p>
+            Its title didn&apos;t contain one of your words, contained a skip word, or it failed a rule (on-site, or only for
+            another region). Adjust the words on <Link href="/discover">Find leads</Link>.
           </p>
         </div>
         <div className="card">

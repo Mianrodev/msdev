@@ -11,6 +11,7 @@ import { records, rules } from "../src/db/schema";
 import { effortFrom } from "../src/core/types";
 import { logHistory } from "../src/services/history";
 import { DEFAULT_RULES, seedDefaultRules } from "../src/services/rules";
+import { seedDiscoveryRules } from "../src/services/discovery";
 import { syncIdentityTerms } from "./lib/identity";
 import { DERIVED_CRITERIA } from "./lib/import-tracker";
 import type { Ctx } from "../src/services/context";
@@ -67,6 +68,7 @@ async function main() {
   await ensureWorkspace(db);
   const ctx = { db, workspaceId: DEFAULT_WORKSPACE_ID, actor: { kind: "human" as const, id: "owner" } };
   await seedDefaultRules(ctx);
+  await seedDiscoveryRules(ctx);
   await refreshBuiltInWording(ctx);
   await moveEffortRatings(ctx);
   const n = await syncIdentityTerms(ctx);

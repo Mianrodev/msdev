@@ -8,8 +8,8 @@ import { getCtx } from "@/services/request";
 export const dynamic = "force-dynamic";
 
 const PAGE = 300;
-const LIST_ORDER: ListKey[] = ["ready", "checking", "hold", "archive", "all"];
-const VIEW_TO_LIST: Record<string, ListKey> = { prospects: "ready", leads: "checking", hold: "hold", archive: "archive", all: "all" };
+const LIST_ORDER: ListKey[] = ["review", "ready", "checking", "hold", "archive", "all"];
+const VIEW_TO_LIST: Record<string, ListKey> = { review: "review", prospects: "ready", leads: "checking", hold: "hold", archive: "archive", all: "all" };
 
 const SORTS: Record<string, { label: string; key: SortKey; dir: "asc" | "desc" }> = {
   recent: { label: "Recently changed", key: "updated", dir: "desc" },
@@ -20,7 +20,15 @@ const SORTS: Record<string, { label: string; key: SortKey; dir: "asc" | "desc" }
 
 type Col = { head: string; cell: (r: RecordRow) => React.ReactNode; className?: string };
 
+const attr = (r: RecordRow, k: string) => (typeof r.attributes[k] === "string" ? (r.attributes[k] as string) : null);
+
 const COLS: Record<ListKey, Col[]> = {
+  review: [
+    { head: "Where", cell: (r) => attr(r, "postingLocation") ?? r.location ?? "—", className: "why" },
+    { head: "Pay (if listed)", cell: (r) => attr(r, "compensation") ?? "—", className: "why" },
+    { head: "Posted", cell: (r) => fmtDay(attr(r, "postedOn")) },
+    { head: "Link", cell: (r) => <Ext href={r.sourceUrl} label="Open" /> },
+  ],
   ready: [
     { head: "Fit", cell: (r) => (r.fitTier ? TIER_NAMES[r.fitTier] : "—") },
     { head: "Effort to apply", cell: (r) => (typeof r.attributes.effortToApply === "string" ? r.attributes.effortToApply : "—") },
@@ -51,7 +59,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
   const requested = one(sp.list) ?? VIEW_TO_LIST[one(sp.view) ?? ""] ?? "ready";
   const list: ListKey = (LIST_ORDER as string[]).includes(requested) ? (requested as ListKey) : "ready";
   const q = one(sp.q)?.trim() || undefined;
-  const sortName = one(sp.sort) && SORTS[one(sp.sort)!] ? one(sp.sort)! : list === "ready" ? "fit" : "recent";
+  const sortName = one(sp.sort) && SORTS[one(sp.sort)!] ? one(sp.sort)! : list === "ready" ? "fit" : list === "review" ? "company" : "recent";
   const sort = SORTS[sortName];
   const limit = Math.min(Number(one(sp.limit)) || PAGE, 5000);
 
@@ -61,6 +69,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
   ]);
   const shown = rows.slice(0, limit);
   const countOf: Record<ListKey, number> = {
+    review: counts.review,
     ready: counts.prospects,
     checking: counts.leads,
     hold: counts.hold,
@@ -120,6 +129,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
 
       {shown.length === 0 ? (
         <Empty title={q ? `Nothing on this list matches "${q}".` : `Nothing on the ${LISTS[list].title} list right now.`}>
+          {list === "review" && !q && (
+            <p className="muted">
+              New jobs appear here after a job board search. <Link href="/discover">Search now</Link> — it also runs every Monday.
+            </p>
+          )}
           {list === "ready" && !q && (
             <p className="muted">
               Leads land here after they pass every check. Run the <Link href="/#weekly">weekly check</Link> to move leads along.

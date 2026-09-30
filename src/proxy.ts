@@ -19,7 +19,8 @@ export function proxy(req: NextRequest) {
       "No database is connected yet. In Vercel, open this project → <b>Storage</b> → create a <b>Neon</b> database and connect it, then <b>Redeploy</b>.",
     );
   }
-  if (pathname === "/login" || req.cookies.has(SESSION_COOKIE)) return NextResponse.next();
+  // The weekly scheduler has no login cookie; that route checks its own caller (see its file).
+  if (pathname === "/login" || pathname === "/api/cron/weekly" || req.cookies.has(SESSION_COOKIE)) return NextResponse.next();
   if (req.method !== "GET") return new NextResponse("Please sign in again.", { status: 401 });
   const url = req.nextUrl.clone();
   url.pathname = "/login";
