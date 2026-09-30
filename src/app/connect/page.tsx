@@ -74,6 +74,30 @@ export default async function ConnectPage({ searchParams }: { searchParams: Sear
         <p className="small muted">Works with Claude Pro and Max. Custom connectors are free to add.</p>
       </section>
 
+      <details className="card" style={{ marginBottom: "1.5rem" }}>
+        <summary>Using ChatGPT instead?</summary>
+        <p>
+          ChatGPT can use the same link, but what it can do depends on your ChatGPT plan (as of late 2026 — OpenAI changes
+          this often):
+        </p>
+        <ul>
+          <li>
+            <strong>Business, Enterprise or Edu:</strong> everything above. An admin turns on{" "}
+            <em>Developer mode</em> (Settings → Apps → Advanced settings), then <strong>Apps → Create</strong>: paste your
+            private link as the address, choose <strong>No authentication</strong>, press <strong>Scan tools</strong>, then{" "}
+            <strong>Create</strong>.
+          </li>
+          <li>
+            <strong>Pro:</strong> read only — it can read your leads and explain them, but can&apos;t save cover letters or
+            notes into the app (copy them in yourself). Same steps, from your own Settings → Apps.
+          </li>
+          <li>
+            <strong>Plus or Free:</strong> custom connections aren&apos;t available.
+          </li>
+        </ul>
+        <p className="small muted">ChatGPT connections work on the website only, not the phone app.</p>
+      </details>
+
       <div className="grid cols-2">
         <section className="card">
           <h2 style={{ marginTop: 0 }}>What your AI can do</h2>
