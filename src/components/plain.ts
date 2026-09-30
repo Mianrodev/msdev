@@ -205,6 +205,7 @@ export function eventName(event: string): string {
     run: "Re-check run",
     run_update: "Weekly check run",
     job_board_search: "Job boards searched",
+    company_board_found: "New company found",
     "import.state": "Imported",
     "import.history.reconciliation": "Old history (from spreadsheet)",
     "import.history.activity_log": "Old activity (from spreadsheet)",
@@ -245,7 +246,19 @@ export function describeSearch(d: DiscoveryReport): string[] {
   if (d.stillOpen || d.closed) {
     lines.push(`Checked your leads' links: ${d.stillOpen} still open, ${d.closed} no longer listed (closed).`);
   }
+  const confirmed = d.companiesConfirmed?.length ?? 0;
+  if (d.sitesChecked !== undefined) {
+    lines.push(
+      confirmed
+        ? `Remote-job sites: found ${plural(confirmed, "new company", "new companies")} and confirmed the jobs on their own careers pages — they're watched from now on.`
+        : `Remote-job sites: no new companies confirmed this time.`,
+    );
+  }
+  if (d.notConfirmedTotal)
+    lines.push(`${plural(d.notConfirmedTotal, "job")} on remote-job sites couldn't be confirmed with the company, so ${d.notConfirmedTotal === 1 ? "it wasn't" : "they weren't"} added (see Find leads to check them yourself).`);
+  if (d.warningSkipped) lines.push(`Dropped ${plural(d.warningSkipped, "listing")} showing scam warning signs.`);
   if (d.capped) lines.push("There were more new jobs than one search adds — the rest will come in next time.");
   if (d.boardsFailed.length) lines.push(`${plural(d.boardsFailed.length, "board")} couldn't be read this time (see Find leads).`);
+  if (d.sitesFailed?.length) lines.push(`${plural(d.sitesFailed.length, "remote-job site")} couldn't be read this time.`);
   return lines;
 }

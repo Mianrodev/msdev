@@ -38,6 +38,7 @@ import { getCtx } from "@/services/request";
 export const dynamic = "force-dynamic";
 
 const JOB_FACTS: [string, string][] = [
+  ["genuine", "Is it genuine?"],
   ["postingLocation", "Location on the listing"],
   ["openToYourRegion", "Open to your region?"],
   ["workplaceType", "Remote / office"],

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { detectBoard } from "@/sources/job-boards";
+import { candidateBoards, detectBoard } from "@/sources/job-boards";
+import { warningSigns } from "@/sources/job-sites";
 import { listRecords, getRecord, upsertLead, holdRecord } from "@/services/records";
 import { createRule } from "@/services/rules";
-import { addBoard, regionVerdict, reviewFoundJob, runDiscovery, seedDiscoveryRules, titleMatches, DEFAULTS } from "@/services/discovery";
+import { addBoard, listBoards, regionVerdict, reviewFoundJob, runDiscovery, seedDiscoveryRules, titleMatches, DEFAULTS } from "@/services/discovery";
 import { runUpdate } from "@/services/run-update";
 import { listHistory } from "@/services/history";
 import { testCtx } from "./helpers";
@@ -38,6 +39,11 @@ describe("job board links", () => {
     expect(detectBoard("https://jobs.ashbyhq.com/Scale%20Army%20Careers")).toMatchObject({ provider: "ashby", slug: "Scale Army Careers" });
     expect(detectBoard("https://apply.workable.com/huzzle/j/991B0F2A1C/")).toMatchObject({ provider: "workable", slug: "huzzle", postingId: "991B0F2A1C" });
     expect(detectBoard("https://www.linkedin.com/jobs/view/1")).toBeNull();
+    expect(detectBoard("https://bunq.recruitee.com/o/ios-developer-3")).toMatchObject({ provider: "recruitee", slug: "bunq", postingId: "ios-developer-3" });
+    expect(detectBoard("https://bunq.recruitee.com/")).toMatchObject({ provider: "recruitee", slug: "bunq" });
+    expect(detectBoard("https://jobs.smartrecruiters.com/Acme/744000148454651-data-consultant")).toMatchObject({ provider: "smartrecruiters", slug: "Acme", postingId: "744000148454651" });
+    expect(candidateBoards("Globex Labs, Inc.").map((b) => `${b.provider}:${b.slug}`)).toContain("lever:globexlabs");
+    expect(candidateBoards("Globex Labs, Inc.").map((b) => `${b.provider}:${b.slug}`)).toContain("greenhouse:globex-labs");
   });
   it("matches titles and regions without guessing", () => {
     expect(titleMatches("Implementation Specialist", DEFAULTS)).toBe(true);
@@ -127,5 +133,60 @@ describe("finding leads", () => {
     const found = (await listRecords(ctx)).filter((r) => r.origin === "discovery").map((r) => r.opportunity);
     expect(found).toEqual(["Implementation Consultant"]);
     expect(rep).toMatchObject({ newLeads: 1, alreadyKnown: 2 });
+  });
+
+  it("finds new companies through remote-job sites, but only trusts jobs confirmed on the company's own board", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    const calls: string[] = [];
+    const ok = (body: unknown) => ({ status: 200, json: async () => body });
+    const siteFetcher = async (url: string) => {
+      calls.push(url);
+      if (url.startsWith("https://remotive.com/api/remote-jobs"))
+        return ok({
+          jobs: [
+            { company_name: "Globex Corp", title: "Implementation Specialist", candidate_required_location: "Worldwide", url: "https://remotive.com/remote-jobs/1" },
+            { company_name: "Initech", title: "CRM Automation Consultant", candidate_required_location: "India", url: "https://remotive.com/remote-jobs/2" },
+            { company_name: "Quick Cash Jobs", title: "Implementation Assistant", candidate_required_location: "Worldwide", url: "https://remotive.com/remote-jobs/3", description: "Message us on WhatsApp. Small registration fee required." },
+            { company_name: "Stateside", title: "Implementation Lead", candidate_required_location: "USA", url: "https://remotive.com/remote-jobs/4" },
+          ],
+        });
+      if (url.startsWith("https://boards-api.greenhouse.io/v1/boards/globex/jobs"))
+        return ok({
+          jobs: [
+            { id: 11, title: "Implementation Specialist", absolute_url: "https://job-boards.greenhouse.io/globex/jobs/11", location: { name: "Remote" }, company_name: "Globex" },
+            { id: 12, title: "Onboarding Manager", absolute_url: "https://job-boards.greenhouse.io/globex/jobs/12", location: { name: "Remote - India" }, company_name: "Globex" },
+            { id: 13, title: "Implementation Consultant", absolute_url: "https://job-boards.greenhouse.io/globex/jobs/13", location: { name: "Berlin" }, company_name: "Globex" },
+          ],
+        });
+      return { status: 404, json: async () => ({}) };
+    };
+
+    const rep = await runDiscovery(ctx, { fetcher: siteFetcher, today: "2026-09-30" });
+    expect(rep.companiesConfirmed).toEqual([{ company: "Globex", board: "Greenhouse", site: "Remotive" }]);
+    expect(rep).toMatchObject({ newLeads: 2, filteredOut: 1, notConfirmedTotal: 1, warningSkipped: 1 });
+    expect(rep.notConfirmed?.map((n) => n.company)).toEqual(["Initech"]);
+
+    const found = (await listRecords(ctx)).filter((r) => r.origin === "discovery");
+    expect(found.map((r) => r.opportunity).sort()).toEqual(["Implementation Specialist", "Onboarding Manager"]);
+    for (const r of found) {
+      expect(r.sourceUrl).toMatch(/^https:\/\/job-boards\.greenhouse\.io\/globex\/jobs\//); // the company's page, not the job site
+      expect(r.attributes.genuine).toMatch(/^YES — first seen on Remotive, then confirmed on Globex's own careers page/);
+    }
+    expect((await listBoards(ctx)).find((b) => b.company === "Globex")).toMatchObject({ foundVia: "Remotive", enabled: true });
+
+    // Next week: Globex is simply a watched board, and Initech isn't looked up again yet.
+    calls.length = 0;
+    const rep2 = await runDiscovery(ctx, { fetcher: siteFetcher, today: "2026-10-07" });
+    expect(rep2.newLeads).toBe(0);
+    expect(rep2.companiesConfirmed).toEqual([]);
+    expect(calls.filter((u) => /initech/i.test(u))).toEqual([]);
+    expect(rep2.notConfirmed?.map((n) => n.company)).toEqual(["Initech"]);
+  });
+
+  it("recognises scam warning signs", () => {
+    expect(warningSigns("Apply via Telegram")).not.toHaveLength(0);
+    expect(warningSigns("A one-time training fee applies")).not.toHaveLength(0);
+    expect(warningSigns("You will own the implementation of our CRM for customers in India.")).toHaveLength(0);
   });
 });

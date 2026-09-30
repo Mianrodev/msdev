@@ -11,6 +11,12 @@
  *  2. New leads: open jobs whose title matches the owner's words are added
  *     (never duplicated; jobs already seen — even archived ones — are
  *     skipped), with the facts the board states and nothing else.
+ *  3. More companies: remote-job sites (Remotive, Himalayas…) are read for
+ *     matching jobs at companies not watched yet. A job only counts once the
+ *     same job is found on the company's OWN careers board — then that board
+ *     is watched from now on and its jobs are added as in 2. Jobs that can't be
+ *     confirmed are listed for the owner to check, never added; ones showing
+ *     scam warning signs are dropped.
  *
  * New finds then go through the weekly check's automatic first look and wait
  * in "New to review" for the owner's yes / hold / no.
@@ -21,6 +27,8 @@ import { normalizeText } from "@/core/dedup";
 import { containsTerm, evaluate, type RuleInput } from "@/core/rules";
 import {
   boardKey,
+  boardLink,
+  candidateBoards,
   detectBoard,
   fetchBoard,
   postingKey,
@@ -29,6 +37,7 @@ import {
   type Fetcher,
   type Posting,
 } from "@/sources/job-boards";
+import { fetchSite, SITES, warningSigns, type Listing, type Site } from "@/sources/job-sites";
 import { asSystem, type Ctx } from "./context";
 import { logHistory } from "./history";
 import { archiveRecord, decideStage, getRecord, holdRecord, upsertLead } from "./records";
@@ -43,6 +52,11 @@ const K = {
   otherRegionWords: "discovery.otherRegionWords",
   extraBoards: "discovery.extraBoards",
   offBoards: "discovery.offBoards",
+  offSites: "discovery.offSites",
+  /** Company boards found through remote-job sites (internal bookkeeping). */
+  foundBoards: "discovery.foundBoards",
+  /** Companies already looked for, so a company without a findable board isn't retried every week. */
+  probed: "discovery.probed",
   last: "discovery.lastRun",
 } as const;
 
@@ -221,18 +235,29 @@ export interface DiscoverySettings {
   otherRegionWords: string[];
   extraBoards: string[];
   offBoards: string[];
+  offSites: string[];
+  foundBoards: FoundBoard[];
+}
+
+export interface FoundBoard {
+  link: string;
+  company: string;
+  site: string;
+  at: string;
 }
 
 const list = (v: unknown, fallback: string[]) => (Array.isArray(v) ? v.map(String).filter(Boolean) : fallback);
 
 export async function getDiscoverySettings(ctx: Ctx): Promise<DiscoverySettings> {
-  const [t, s, r, o, e, off] = await Promise.all([
+  const [t, s, r, o, e, off, offSites, found] = await Promise.all([
     getSetting<unknown>(ctx, K.titleWords, null),
     getSetting<unknown>(ctx, K.skipWords, null),
     getSetting<unknown>(ctx, K.regionWords, null),
     getSetting<unknown>(ctx, K.otherRegionWords, null),
     getSetting<unknown>(ctx, K.extraBoards, []),
     getSetting<unknown>(ctx, K.offBoards, []),
+    getSetting<unknown>(ctx, K.offSites, []),
+    getSetting<unknown>(ctx, K.foundBoards, []),
   ]);
   return {
     titleWords: list(t, DEFAULTS.titleWords),
@@ -241,7 +266,27 @@ export async function getDiscoverySettings(ctx: Ctx): Promise<DiscoverySettings>
     otherRegionWords: list(o, DEFAULTS.otherRegionWords),
     extraBoards: list(e, []),
     offBoards: list(off, []),
+    offSites: list(offSites, []),
+    foundBoards: Array.isArray(found)
+      ? found.filter((f): f is FoundBoard => !!f && typeof f === "object" && typeof (f as FoundBoard).link === "string")
+      : [],
   };
+}
+
+export async function setSiteEnabled(ctx: Ctx, site: string, on: boolean) {
+  if (!(site in SITES)) throw new Error("Unknown job site");
+  const s = await getDiscoverySettings(ctx);
+  const next = on ? s.offSites.filter((k) => k !== site) : [...new Set([...s.offSites, site])];
+  const name = SITES[site as Site].name;
+  await setSetting(ctx, K.offSites, next, on ? `${name} switched on` : `${name} switched off`);
+}
+
+/** App bookkeeping (not an owner setting): written directly, no permission check or history entry. */
+async function saveInternal(ctx: Ctx, key: string, value: unknown) {
+  await ctx.db
+    .insert(settingsTable)
+    .values({ workspaceId: ctx.workspaceId, key, value })
+    .onConflictDoUpdate({ target: [settingsTable.workspaceId, settingsTable.key], set: { value, updatedAt: new Date().toISOString() } });
 }
 
 export async function saveDiscoveryWords(
@@ -279,6 +324,8 @@ export interface WatchedBoard {
   leads: number;
   enabled: boolean;
   addedByHand: boolean;
+  /** The remote-job site through which this company was found, if that's how. */
+  foundVia: string | null;
 }
 
 const pretty = (slug: string) =>
@@ -301,12 +348,13 @@ export async function listBoards(ctx: Ctx): Promise<WatchedBoard[]> {
       .from(targetAccounts)
       .where(eq(targetAccounts.workspaceId, ctx.workspaceId)),
   ]);
-  const boards = new Map<string, { ref: BoardRef; names: Map<string, number>; leads: number; hand: boolean }>();
-  const see = (link: string | null, name: string | null, countLead: boolean, hand = false) => {
+  const boards = new Map<string, { ref: BoardRef; names: Map<string, number>; leads: number; hand: boolean; via: string | null }>();
+  const see = (link: string | null, name: string | null, countLead: boolean, hand = false, via: string | null = null) => {
     const b = detectBoard(link);
     if (!b) return;
     const key = boardKey(b);
-    const e = boards.get(key) ?? { ref: { provider: b.provider, slug: b.slug, region: b.region }, names: new Map(), leads: 0, hand: false };
+    const e = boards.get(key) ?? { ref: { provider: b.provider, slug: b.slug, region: b.region }, names: new Map(), leads: 0, hand: false, via: null };
+    e.via ??= via;
     if (name && !/^unknown$/i.test(name) && !/^\[.*\]$/.test(name)) e.names.set(name, (e.names.get(name) ?? 0) + 1);
     if (countLead) e.leads++;
     e.hand ||= hand;
@@ -321,6 +369,7 @@ export async function listBoards(ctx: Ctx): Promise<WatchedBoard[]> {
     see(a.w, a.a, false);
   }
   for (const link of s.extraBoards) see(link, null, false, true);
+  for (const f of s.foundBoards) see(f.link, f.company, false, false, f.site);
   return [...boards.entries()]
     .map(([key, e]) => ({
       key,
@@ -329,6 +378,7 @@ export async function listBoards(ctx: Ctx): Promise<WatchedBoard[]> {
       leads: e.leads,
       enabled: !s.offBoards.includes(key),
       addedByHand: e.hand,
+      foundVia: e.hand ? null : e.via,
     }))
     .sort((a, b) => a.company.localeCompare(b.company));
 }
@@ -379,6 +429,19 @@ export interface DiscoveryReport {
   skipped: number;
   stillOpen: number;
   closed: number;
+  // Remote-job sites (missing in reports saved before they were added).
+  sitesChecked?: number;
+  sitesFailed?: { site: string; error: string }[];
+  /** Matching jobs on remote-job sites at companies you don't watch yet. */
+  siteMatches?: number;
+  companiesTried?: number;
+  /** Companies whose own careers board was found and confirmed — watched from now on. */
+  companiesConfirmed?: { company: string; board: string; site: string }[];
+  /** Jobs seen on remote-job sites that couldn't be confirmed with the company (a sample). */
+  notConfirmed?: { company: string; title: string; url: string; site: string; location: string | null }[];
+  notConfirmedTotal?: number;
+  /** Jobs dropped because they show scam warning signs. */
+  warningSkipped?: number;
 }
 
 async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -395,16 +458,27 @@ async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Prom
   return out;
 }
 
+const sameTitle = (a: string, b: string) => {
+  const x = normalizeText(a);
+  const y = normalizeText(b);
+  return x === y || (x.length >= 8 && y.length >= 8 && (x.includes(y) || y.includes(x)));
+};
+
+/** A company looked for recently without finding its board isn't retried for this many days. */
+const RETRY_DAYS = 30;
+const MAX_COMPANIES_PER_SEARCH = 80;
+
 export async function runDiscovery(
   ctx: Ctx,
-  opts: { fetcher?: Fetcher; maxNew?: number; today?: string } = {},
+  opts: { fetcher?: Fetcher; maxNew?: number; today?: string; sites?: boolean; siteBudgetMs?: number } = {},
 ): Promise<DiscoveryReport> {
   const sys = asSystem(ctx, "job-board-search");
   const today = opts.today ?? new Date().toISOString().slice(0, 10);
   const maxNew = opts.maxNew ?? 200;
   const settings = await getDiscoverySettings(ctx);
   const rules = await activeRules(ctx);
-  const boards = (await listBoards(ctx)).filter((b) => b.enabled);
+  const allBoards = await listBoards(ctx);
+  const boards = allBoards.filter((b) => b.enabled);
 
   const results = await pool(boards, 8, async (b) => ({ b, res: await fetchBoard(b.ref, opts.fetcher) }));
   const report: DiscoveryReport = {
@@ -420,6 +494,14 @@ export async function runDiscovery(
     skipped: 0,
     stillOpen: 0,
     closed: 0,
+    sitesChecked: 0,
+    sitesFailed: [],
+    siteMatches: 0,
+    companiesTried: 0,
+    companiesConfirmed: [],
+    notConfirmed: [],
+    notConfirmedTotal: 0,
+    warningSkipped: 0,
   };
 
   // Every posting any existing lead points at (including archived ones — a rejected job isn't re-added).
@@ -439,19 +521,15 @@ export async function runDiscovery(
   }
 
   const checked = new Set<string>();
-  for (const { b, res } of results) {
-    if (!res.ok) {
-      report.boardsFailed.push({ company: b.company, error: res.error });
-      continue;
-    }
+  /** Link-check existing leads on one company board, then add its new matching jobs. */
+  const processBoard = async (ref: BoardRef, key: string, company: string, postings: Posting[], via?: string) => {
     report.boardsChecked++;
-    report.jobsSeen += res.postings.length;
-    const openIds = new Set(res.postings.map((p) => postingKey(b.ref, p.id)));
-    const company = b.company;
+    report.jobsSeen += postings.length;
+    const openIds = new Set(postings.map((p) => postingKey(ref, p.id)));
 
     // 1. Link check for existing leads on this board.
     for (const [k, recs] of byPosting) {
-      if (!k.startsWith(`${b.key}:`)) continue;
+      if (!k.startsWith(`${key}:`)) continue;
       const open = openIds.has(k);
       for (const r of recs) {
         if (r.status === "archived" || checked.has(r.id)) continue;
@@ -463,10 +541,10 @@ export async function runDiscovery(
     }
 
     // 2. New leads.
-    for (const p of res.postings) {
+    for (const p of postings) {
       if (!p.title || !p.url || !titleMatches(p.title, settings)) continue;
       report.jobsMatching++;
-      if (byPosting.has(postingKey(b.ref, p.id)) || knownJobs.has(sameJob(company, p.title))) {
+      if (byPosting.has(postingKey(ref, p.id)) || knownJobs.has(sameJob(company, p.title))) {
         report.alreadyKnown++;
         continue;
       }
@@ -475,38 +553,138 @@ export async function runDiscovery(
         continue;
       }
       // Jobs that clearly fail your first-look rules (on-site, another region…) are counted, not added.
-      const attributes = foundJobAttributes(b.ref, company, p, settings, today);
-      const firstLook = evaluate(rules, { account: company, opportunity: p.title, location: p.location, sourceBoard: PROVIDER_NAMES[b.ref.provider], ...attributes }, "screen");
+      const attributes = foundJobAttributes(ref, company, p, settings, today, via);
+      const firstLook = evaluate(rules, { account: company, opportunity: p.title, location: p.location, sourceBoard: PROVIDER_NAMES[ref.provider], ...attributes }, "screen");
       if (firstLook.fails.length) {
         report.filteredOut++;
         continue;
       }
       let created = false;
       try {
-        created = await addFoundJob(sys, b.ref, company, p, attributes, today);
+        created = await addFoundJob(sys, ref, company, p, attributes, today);
       } catch {
         report.skipped++; // one unusual listing never stops the search
         continue;
       }
       if (created) {
         report.newLeads++;
-        byPosting.set(postingKey(b.ref, p.id), []);
+        byPosting.set(postingKey(ref, p.id), []);
         knownJobs.add(sameJob(company, p.title));
       } else report.alreadyKnown++;
     }
+  };
+
+  for (const { b, res } of results) {
+    if (!res.ok) {
+      report.boardsFailed.push({ company: b.company, error: res.error });
+      continue;
+    }
+    await processBoard(b.ref, b.key, b.company, res.postings);
+  }
+
+  // 3. Remote-job sites → companies you don't watch yet → confirmed on their own careers board.
+  if (opts.sites !== false) {
+    const siteKeys = (Object.keys(SITES) as Site[]).filter((site) => !settings.offSites.includes(site));
+    const general = /^(anywhere|worldwide|global|international|apac|asia|emea|latam|remote)$/i;
+    const country = settings.regionWords.find((w) => !general.test(w.trim()));
+    const siteResults = await pool(siteKeys, 6, async (site) => ({
+      site,
+      res: await fetchSite(site, { searchWords: settings.titleWords, country }, opts.fetcher),
+    }));
+    const watchedNames = new Set(allBoards.map((b) => normalizeText(b.company)));
+    const watchedKeys = new Set(allBoards.map((b) => b.key));
+    const byCompany = new Map<string, { company: string; hints: Set<string>; listings: Listing[] }>();
+    for (const { site, res } of siteResults) {
+      if (!res.ok) {
+        report.sitesFailed!.push({ site: SITES[site].name, error: res.error });
+        continue;
+      }
+      report.sitesChecked!++;
+      for (const l of res.listings) {
+        if (!titleMatches(l.title, settings)) continue;
+        // These sites only list remote jobs; a listing only for another region is skipped here.
+        if (/^NO/.test(regionVerdict(l.location, settings.regionWords, settings.otherRegionWords, "remote"))) continue;
+        const name = normalizeText(l.company);
+        if (!name || watchedNames.has(name) || knownJobs.has(sameJob(l.company, l.title))) continue;
+        report.siteMatches!++;
+        const e = byCompany.get(name) ?? { company: l.company, hints: new Set<string>(), listings: [] };
+        if (l.companyHint) e.hints.add(l.companyHint);
+        if (!e.listings.some((x) => sameTitle(x.title, l.title))) e.listings.push(l);
+        byCompany.set(name, e);
+      }
+    }
+
+    const notConfirmed = (l: Listing) => {
+      if (warningSigns(`${l.title}\n${l.summary ?? ""}`).length) {
+        report.warningSkipped!++;
+        return;
+      }
+      report.notConfirmedTotal!++;
+      if (report.notConfirmed!.length < 60)
+        report.notConfirmed!.push({ company: l.company, title: l.title, url: l.url, site: SITES[l.site].name, location: l.location });
+    };
+
+    const probed = { ...(await getSetting<Record<string, { at: string; link: string | null }>>(ctx, K.probed, {})) };
+    const triedRecently = (name: string) => {
+      const p = probed[name];
+      return !!p && p.link === null && Date.parse(today) - Date.parse(p.at) < RETRY_DAYS * 86_400_000;
+    };
+    const companies = [...byCompany.entries()];
+    const toTry = companies.filter(([name]) => !triedRecently(name)).slice(0, MAX_COMPANIES_PER_SEARCH);
+    const tryNames = new Set(toTry.map(([name]) => name));
+    for (const [name, e] of companies) if (!tryNames.has(name)) e.listings.forEach(notConfirmed);
+
+    const deadline = Date.now() + (opts.siteBudgetMs ?? 90_000);
+    const tries = await pool(toTry, 6, async ([name, e]) => {
+      if (Date.now() > deadline) return { name, e, hit: null, tried: false };
+      for (const ref of candidateBoards(e.company, [...e.hints])) {
+        if (watchedKeys.has(boardKey(ref))) continue;
+        const res = await fetchBoard(ref, opts.fetcher);
+        if (!res.ok || !res.postings.length) continue;
+        // The board must really list one of the jobs — a board that merely shares the name doesn't count.
+        if (e.listings.some((l) => res.postings.some((p) => sameTitle(p.title, l.title)))) return { name, e, hit: { ref, res }, tried: true };
+      }
+      return { name, e, hit: null, tried: true };
+    });
+
+    const foundBoards = [...settings.foundBoards];
+    for (const t of tries) {
+      if (t.tried) report.companiesTried!++;
+      if (!t.hit) {
+        if (t.tried) probed[t.name] = { at: today, link: null };
+        t.e.listings.forEach(notConfirmed);
+        continue;
+      }
+      const { ref, res } = t.hit;
+      const key = boardKey(ref);
+      if (watchedKeys.has(key)) continue; // two names for one company, already handled
+      watchedKeys.add(key);
+      const company = res.company?.trim() || t.e.company;
+      const site = SITES[t.e.listings[0].site].name;
+      foundBoards.push({ link: boardLink(ref), company, site, at: today });
+      probed[t.name] = { at: today, link: boardLink(ref) };
+      report.companiesConfirmed!.push({ company, board: PROVIDER_NAMES[ref.provider], site });
+      await logHistory(sys, {
+        entityType: "setting",
+        entityId: K.foundBoards,
+        event: "company_board_found",
+        reason: `Found ${company}'s own careers page (${PROVIDER_NAMES[ref.provider]}) through ${site} — the job is listed there, so it's genuine. Watched from now on.`,
+      });
+      await processBoard(ref, key, company, res.postings, site);
+    }
+    await saveInternal(ctx, K.foundBoards, foundBoards);
+    await saveInternal(ctx, K.probed, probed);
   }
 
   report.finishedAt = new Date().toISOString();
   // Internal bookkeeping (the summary shown on the page) — not an owner setting, so no permission or history entry.
-  await ctx.db
-    .insert(settingsTable)
-    .values({ workspaceId: ctx.workspaceId, key: K.last, value: report })
-    .onConflictDoUpdate({ target: [settingsTable.workspaceId, settingsTable.key], set: { value: report, updatedAt: report.finishedAt } });
+  await saveInternal(ctx, K.last, report);
+  const via = report.companiesConfirmed?.length ? `, ${report.companiesConfirmed.length} new companies found through remote-job sites` : "";
   await logHistory(sys, {
     entityType: "pipeline_run",
     event: "job_board_search",
-    reason: `Searched ${report.boardsChecked} company job boards: ${report.newLeads} new leads found, ${report.stillOpen} listings still open, ${report.closed} closed${report.boardsFailed.length ? `, ${report.boardsFailed.length} boards couldn't be read` : ""}`,
-    detail: { ...report },
+    reason: `Searched ${report.boardsChecked} company job boards: ${report.newLeads} new leads found, ${report.stillOpen} listings still open, ${report.closed} closed${via}${report.boardsFailed.length ? `, ${report.boardsFailed.length} boards couldn't be read` : ""}`,
+    detail: { ...report, notConfirmed: undefined },
   });
   return report;
 }
@@ -539,11 +717,15 @@ async function markListing(sys: Ctx, r: RecordRow, open: boolean, company: strin
   });
 }
 
-function foundJobAttributes(board: BoardRef, company: string, p: Posting, s: DiscoverySettings, today: string) {
+function foundJobAttributes(board: BoardRef, company: string, p: Posting, s: DiscoverySettings, today: string, via?: string) {
+  const provider = PROVIDER_NAMES[board.provider];
   const attributes: Record<string, unknown> = {
     verifiedOpen: `YES — listed on ${company}'s job board (checked ${today})`,
     openToYourRegion: regionVerdict(p.location, s.regionWords, s.otherRegionWords, p.workplace),
-    foundOn: `${PROVIDER_NAMES[board.provider]} job board`,
+    foundOn: via ? `${via}, confirmed on the company's ${provider} job board` : `${provider} job board`,
+    genuine: via
+      ? `YES — first seen on ${via}, then confirmed on ${company}'s own careers page (${provider})`
+      : `YES — posted on ${company}'s own careers page (${provider})`,
   };
   if (p.location) attributes.postingLocation = p.location;
   if (p.workplace) attributes.workplaceType = p.workplace;

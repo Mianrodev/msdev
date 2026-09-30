@@ -105,8 +105,9 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
           <div style={{ flex: "1 1 380px" }}>
             <h2 style={{ marginTop: 0 }}>Find new leads</h2>
             <p className="muted">
-              Searches the job boards of every company in your tracker for jobs matching your words, checks whether your
-              leads&apos; listings are still open, and sorts everything with your rules. It happens by itself every Monday —
+              Searches the careers pages of every company you watch (and remote-job sites, for new companies) for jobs
+              matching your words, checks whether your leads&apos; listings are still open, and sorts everything with your
+              rules. Only jobs confirmed on the company&apos;s own careers page are added. It happens by itself every Monday —
               press the button to do it now. It never applies or contacts anyone.
             </p>
             <p className="small muted">
@@ -116,7 +117,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
           </div>
           <form action={findLeadsAction}>
             <input type="hidden" name="back" value="/" />
-            <SubmitButton className="primary big" pending="Searching job boards… (up to a minute)">
+            <SubmitButton className="primary big" pending="Searching… (up to 2 minutes)">
               Find new leads
             </SubmitButton>
           </form>

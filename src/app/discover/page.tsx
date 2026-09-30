@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { addBoardAction, discoveryWordsAction, findLeadsAction, toggleBoardAction } from "../actions";
+import { addBoardAction, discoveryWordsAction, findLeadsAction, toggleBoardAction, toggleSiteAction } from "../actions";
 import { SubmitButton } from "@/components/client";
 import { describeSearch, fmtWhen } from "@/components/plain";
-import { Flash, PageHeader, type SearchParams } from "@/components/ui";
+import { Ext, Flash, PageHeader, type SearchParams } from "@/components/ui";
 import { getDiscoverySettings, lastDiscovery, listBoards } from "@/services/discovery";
 import { getCtx } from "@/services/request";
 import { PROVIDER_NAMES } from "@/sources/job-boards";
+import { SITES, type Site } from "@/sources/job-sites";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -31,11 +32,11 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
       <Flash sp={sp} />
       <PageHeader
         title="Find leads"
-        intro="The app reads the public job boards of the companies you're tracking and adds new jobs that match your words and rules. It runs by itself every Monday; you can also run it now. It only reads job listings — it never applies or contacts anyone."
+        intro="The app reads the careers pages of the companies you're watching and adds new jobs that match your words and rules. It also looks at remote-job sites to find new companies — but only trusts a job once it's on the company's own careers page. It runs by itself every Monday; you can also run it now. It only reads job listings — it never applies or contacts anyone."
       >
         <form action={findLeadsAction}>
           <input type="hidden" name="back" value="/discover" />
-          <SubmitButton className="primary big" pending="Searching job boards… (up to a minute)">
+          <SubmitButton className="primary big" pending="Searching… (up to 2 minutes)">
             Search now
           </SubmitButton>
         </form>
@@ -54,7 +55,60 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
               <Link href="/records?list=review">Review the new jobs →</Link>
             </p>
           )}
+          {!!last.companiesConfirmed?.length && (
+            <details style={{ marginTop: ".5rem" }}>
+              <summary>New companies found ({last.companiesConfirmed.length})</summary>
+              <ul className="small" style={{ margin: ".3rem 0 0", paddingLeft: "1.2rem" }}>
+                {last.companiesConfirmed.map((c) => (
+                  <li key={c.company}>
+                    <strong>{c.company}</strong> — seen on {c.site}, confirmed on its own careers page ({c.board})
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
+      )}
+
+      {!!last?.notConfirmed?.length && (
+        <details className="card" style={{ marginBottom: "1rem" }}>
+          <summary>Jobs we couldn&apos;t confirm with the company ({last.notConfirmedTotal})</summary>
+          <p className="small muted">
+            These match your words, but the app couldn&apos;t find them on the company&apos;s own careers page (the company may
+            use a careers system the app can&apos;t read). They were <strong>not</strong> added. If one interests you, look for
+            it on the company&apos;s own website — if it&apos;s there, it&apos;s genuine: add it with{" "}
+            <Link href="/records/new">Add a lead by hand</Link>. Never pay a fee or move to WhatsApp/Telegram for a job.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Job</th>
+                  <th>Where</th>
+                  <th>Seen on</th>
+                </tr>
+              </thead>
+              <tbody>
+                {last.notConfirmed.map((n) => (
+                  <tr key={n.url}>
+                    <td>
+                      <strong>{n.company}</strong>
+                    </td>
+                    <td className="small">{n.title}</td>
+                    <td className="small">{n.location ?? "Not stated"}</td>
+                    <td className="small">
+                      <Ext href={n.url} label={n.site} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {(last.notConfirmedTotal ?? 0) > last.notConfirmed.length && (
+            <p className="small muted">Showing the first {last.notConfirmed.length}.</p>
+          )}
+        </details>
       )}
 
       <h2>What to look for</h2>
@@ -89,10 +143,47 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
         </div>
       </form>
 
+      <h2>Remote-job sites</h2>
+      <p className="muted">
+        Used only to discover companies you don&apos;t watch yet. When a matching job appears on one of these sites, the app
+        looks for the same job on the company&apos;s own careers page. Found → the job is genuine: it&apos;s added and the
+        company is watched from then on. Not found → it isn&apos;t added (listed above for you to check). Listings with scam
+        warning signs — a fee, WhatsApp or Telegram contact, pay in crypto, &quot;no interview&quot; — are always dropped.
+      </p>
+      <div className="card table-wrap" style={{ marginBottom: "1.5rem" }}>
+        <table>
+          <tbody>
+            {(Object.keys(SITES) as Site[]).map((site) => {
+              const off = settings.offSites.includes(site);
+              const failedSite = last?.sitesFailed?.find((f) => f.site === SITES[site].name);
+              return (
+                <tr key={site}>
+                  <td>
+                    <strong>{SITES[site].name}</strong>
+                    {failedSite && <div className="small" style={{ color: "var(--warn)" }}>Last time: {failedSite.error}</div>}
+                  </td>
+                  <td className="small">
+                    <Ext href={SITES[site].home} label={SITES[site].home.replace(/^https:\/\/(www\.)?/, "")} />
+                  </td>
+                  <td>
+                    <form action={toggleSiteAction.bind(null, site, off)}>
+                      <SubmitButton className="small" pending="…">
+                        {off ? "Off — switch on" : "✓ On — switch off"}
+                      </SubmitButton>
+                    </form>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
       <h2>Companies being watched ({on})</h2>
       <p className="muted">
-        Every company in your tracker whose jobs are on Lever, Greenhouse, Ashby or Workable is watched automatically. Add
-        others by pasting a link to their careers page.
+        Every company in your tracker whose careers page runs on Lever, Greenhouse, Ashby, Workable, Recruitee or
+        SmartRecruiters is watched automatically, plus companies found through remote-job sites. Add others by pasting a
+        link to their careers page.
       </p>
       <form action={addBoardAction} className="inline card" style={{ marginBottom: "1rem" }}>
         <label style={{ flex: "1 1 360px" }}>
@@ -110,6 +201,7 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
                 <th>Company</th>
                 <th>Job board</th>
                 <th>Your leads there</th>
+                <th>Added</th>
                 <th>Searched?</th>
               </tr>
             </thead>
@@ -124,6 +216,7 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
                     {PROVIDER_NAMES[b.ref.provider]} <span className="muted">({b.ref.slug})</span>
                   </td>
                   <td className="small">{b.leads}</td>
+                  <td className="small">{b.addedByHand ? "By you" : b.foundVia ? `Found via ${b.foundVia}` : "From your tracker"}</td>
                   <td>
                     <form action={toggleBoardAction.bind(null, b.key, !b.enabled)}>
                       <SubmitButton className="small" pending="…">

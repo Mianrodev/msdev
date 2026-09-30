@@ -19,7 +19,7 @@ import {
 import { runReconciliation } from "@/services/reconcile";
 import { runUpdate } from "@/services/run-update";
 import { describeSearch, humanize, OUTREACH_NAMES, SOURCE_NAMES, whereItIs } from "@/components/plain";
-import { addBoard, reviewFoundJob, runDiscovery, saveDiscoveryWords, setBoardEnabled } from "@/services/discovery";
+import { addBoard, reviewFoundJob, runDiscovery, saveDiscoveryWords, setBoardEnabled, setSiteEnabled } from "@/services/discovery";
 import { saveAnswers } from "@/services/answers";
 import { savePrivacy, PRIVACY_FIELDS, type PrivacyDetails } from "@/services/privacy";
 import { createRule, IDENTITY_TERMS_KEY, setRuleEnabled, setSetting, updateRule } from "@/services/rules";
@@ -456,5 +456,13 @@ export async function toggleBoardAction(key: string, on: boolean) {
   await act("/discover", async () => {
     await setBoardEnabled(ctx, key, on);
     return on ? "Company switched on." : "Company switched off — its jobs won't be searched.";
+  });
+}
+
+export async function toggleSiteAction(site: string, on: boolean) {
+  const ctx = await getCtx();
+  await act("/discover", async () => {
+    await setSiteEnabled(ctx, site, on);
+    return on ? "Site switched on." : "Site switched off — it won't be used to find new companies.";
   });
 }

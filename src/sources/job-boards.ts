@@ -1,6 +1,6 @@
 /**
  * Read-only access to public company job boards (Lever, Greenhouse, Ashby,
- * Workable). These are the official, free, public feeds each board publishes
+ * Workable, Recruitee, SmartRecruiters). These are the official, free, public feeds each board publishes
  * for its customers' careers pages — no account or key needed.
  *
  * This is the ONLY module allowed to make network requests (see
@@ -8,13 +8,15 @@
  * below; it never submits, posts or contacts anything.
  */
 
-export type Provider = "lever" | "greenhouse" | "ashby" | "workable";
+export type Provider = "lever" | "greenhouse" | "ashby" | "workable" | "recruitee" | "smartrecruiters";
 
 export const PROVIDER_NAMES: Record<Provider, string> = {
   lever: "Lever",
   greenhouse: "Greenhouse",
   ashby: "Ashby",
   workable: "Workable",
+  recruitee: "Recruitee",
+  smartrecruiters: "SmartRecruiters",
 };
 
 export interface BoardRef {
@@ -56,7 +58,7 @@ export function detectBoard(link: string | null | undefined): (BoardRef & { post
   const host = u.hostname.toLowerCase().replace(/^www\./, "");
   const parts = u.pathname.split("/").filter(Boolean).map((p) => decodeURIComponent(p));
   const [a, b, c] = parts;
-  if (!a) return null;
+  if (!a && !host.endsWith(".recruitee.com")) return null;
 
   if (host === "jobs.lever.co" || host === "jobs.eu.lever.co") {
     return { provider: "lever", slug: a, region: host.includes(".eu.") ? "eu" : undefined, postingId: isUuid(b) ? b : undefined };
@@ -73,11 +75,64 @@ export function detectBoard(link: string | null | undefined): (BoardRef & { post
   if (host === "jobs.ashbyhq.com") {
     return { provider: "ashby", slug: a, postingId: isUuid(b) ? b : undefined };
   }
+  if (host.endsWith(".recruitee.com") && host.split(".").length === 3) {
+    // {slug}.recruitee.com/o/{job}
+    const slug = host.split(".")[0];
+    if (slug === "www" || slug === "app") return null;
+    return { provider: "recruitee", slug, postingId: a === "o" && b ? b : undefined };
+  }
+  if (host === "jobs.smartrecruiters.com" || host === "careers.smartrecruiters.com") {
+    // {Company}/{id}-{title}
+    if (a === "oneclick-ui" || a === "sr-jobs") return null;
+    return { provider: "smartrecruiters", slug: a, postingId: /^\d+/.exec(b ?? "")?.[0] };
+  }
   if (host === "apply.workable.com") {
     if (a === "api" || a === "j") return null;
     return { provider: "workable", slug: a, postingId: b === "j" && c ? c : undefined };
   }
   return null;
+}
+
+/** The careers-page address for a board (the form detectBoard recognises). */
+export function boardLink(b: BoardRef): string {
+  const slug = encodeURIComponent(b.slug);
+  switch (b.provider) {
+    case "lever":
+      return `https://jobs${b.region === "eu" ? ".eu" : ""}.lever.co/${slug}`;
+    case "greenhouse":
+      return `https://job-boards${b.region === "eu" ? ".eu" : ""}.greenhouse.io/${slug}`;
+    case "ashby":
+      return `https://jobs.ashbyhq.com/${slug}`;
+    case "workable":
+      return `https://apply.workable.com/${slug}/`;
+    case "recruitee":
+      return `https://${b.slug}.recruitee.com/`;
+    case "smartrecruiters":
+      return `https://jobs.smartrecruiters.com/${slug}`;
+  }
+}
+
+/**
+ * Where a company's own careers board might be, from its name: the boards to try, most likely first.
+ * Only ever used together with a check that the job is really listed there.
+ */
+export function candidateBoards(company: string, hints: string[] = []): BoardRef[] {
+  const words = company
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(inc|llc|ltd|limited|gmbh|corp|corporation|co|company|plc|pvt|private|bv|sa|ag|the)\b\.?/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  if (!words.length) return [];
+  const slugs = [...new Set([...hints.map((h) => h.toLowerCase()).filter((h) => /^[a-z0-9-]{2,60}$/.test(h)), words.join(""), words.join("-")])].slice(0, 3);
+  const out: BoardRef[] = [];
+  for (const provider of ["greenhouse", "lever", "ashby", "recruitee"] as const) for (const slug of slugs) out.push({ provider, slug });
+  out.push({ provider: "smartrecruiters", slug: words.join("") });
+  return out;
 }
 
 function isUuid(s: string | undefined): s is string {
@@ -115,16 +170,19 @@ const iso = (v: unknown): string | null => {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 };
 
-export type Fetcher = (url: string) => Promise<{ status: number; json: () => Promise<unknown> }>;
+export type Fetcher = (url: string) => Promise<{ status: number; json: () => Promise<unknown>; text?: () => Promise<string> }>;
 
-const defaultFetcher: Fetcher = async (url) => {
+export const defaultFetcher: Fetcher = async (url) => {
   const res = await fetch(url, {
-    headers: { accept: "application/json", "user-agent": "ProspectCRM/1.0 (reads public job listings)" },
+    headers: { accept: "application/json, application/rss+xml;q=0.9", "user-agent": "ProspectCRM/1.0 (reads public job listings)" },
     signal: AbortSignal.timeout(15_000),
     cache: "no-store",
   });
-  return { status: res.status, json: () => res.json() };
+  return { status: res.status, json: () => res.json(), text: () => res.text() };
 };
+
+/** HTML to readable plain text (shared with the remote-job site reader). */
+export const plainText = (html: string | null | undefined, max = 1500) => plain(html, max);
 
 /** Fetch every open job on one company's board. Failures are returned, never thrown. */
 export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetcher): Promise<BoardResult> {
@@ -211,6 +269,57 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
               };
             }),
         };
+      }
+      case "recruitee": {
+        const res = await fetcher(`https://${slug}.recruitee.com/api/offers/`);
+        if (res.status !== 200) return { ok: false, error: `board answered ${res.status}` };
+        const body = (await res.json()) as { offers?: Record<string, unknown>[] };
+        if (!Array.isArray(body.offers)) return { ok: false, error: "unexpected response" };
+        return {
+          ok: true,
+          company: (body.offers[0]?.company_name as string) ?? null,
+          postings: body.offers
+            .filter((r) => r.status === undefined || r.status === "published")
+            .map((r) => ({
+              id: String(r.slug ?? r.id),
+              title: String(r.title ?? "").trim(),
+              url: String(r.careers_url ?? `https://${board.slug}.recruitee.com/o/${String(r.slug ?? "")}`),
+              location: (r.location as string) || [r.city, r.country].filter(Boolean).join(", ") || null,
+              workplace: r.remote === true ? "remote" : r.hybrid === true ? "hybrid" : r.on_site === true ? "onsite" : null,
+              employment: (r.employment_type_code as string)?.replace(/_/g, " ") ?? null,
+              compensation: null,
+              postedAt: iso(typeof r.published_at === "string" ? r.published_at.replace(" UTC", "Z").replace(" ", "T") : null),
+              summary: plain(r.description as string),
+            })),
+        };
+      }
+      case "smartrecruiters": {
+        const postings: Posting[] = [];
+        let company: string | null = null;
+        for (let offset = 0; offset < 1000; offset += 100) {
+          const res = await fetcher(`https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=100&offset=${offset}`);
+          if (res.status !== 200) return { ok: false, error: `board answered ${res.status}` };
+          const body = (await res.json()) as { totalFound?: number; content?: Record<string, unknown>[] };
+          if (!Array.isArray(body.content)) return { ok: false, error: "unexpected response" };
+          for (const r of body.content) {
+            const loc = (r.location ?? {}) as { fullLocation?: string; remote?: boolean; hybrid?: boolean };
+            company ??= ((r.company ?? {}) as { name?: string }).name ?? null;
+            postings.push({
+              id: String(r.id),
+              title: String(r.name ?? "").trim(),
+              url: `https://jobs.smartrecruiters.com/${slug}/${String(r.id)}`,
+              location: loc.fullLocation ?? null,
+              // SmartRecruiters states it explicitly: remote, hybrid, or neither (on-site).
+              workplace: loc.remote === true ? "remote" : loc.hybrid === true ? "hybrid" : loc.remote === false ? "onsite" : null,
+              employment: ((r.typeOfEmployment ?? {}) as { label?: string }).label ?? null,
+              compensation: null,
+              postedAt: iso(r.releasedDate),
+              summary: null,
+            });
+          }
+          if (body.content.length < 100 || postings.length >= (body.totalFound ?? 0)) break;
+        }
+        return { ok: true, company, postings };
       }
       case "workable": {
         const res = await fetcher(`https://apply.workable.com/api/v1/widget/accounts/${slug}`);
