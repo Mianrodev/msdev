@@ -55,6 +55,13 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
               <Link href="/records?list=review">Review the new jobs →</Link>
             </p>
           )}
+          {last.timing && (
+            <p className="small muted" style={{ margin: ".4rem 0 0" }}>
+              Took {Math.round(last.timing.total)} seconds (reading job boards {Math.round(last.timing.boards)}s, remote-job
+              sites {Math.round(last.timing.sites)}s, saving {Math.round(last.timing.saving)}s; server reply time{" "}
+              {last.timing.dbMs} ms).
+            </p>
+          )}
           {!!last.companiesConfirmed?.length && (
             <details style={{ marginTop: ".5rem" }}>
               <summary>New companies found ({last.companiesConfirmed.length})</summary>

@@ -442,6 +442,8 @@ export interface DiscoveryReport {
   notConfirmedTotal?: number;
   /** Jobs dropped because they show scam warning signs. */
   warningSkipped?: number;
+  /** How long each part took (seconds), and one database round trip (ms) — for spotting slow set-ups. */
+  timing?: { boards: number; sites: number; saving: number; total: number; dbMs: number };
 }
 
 async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -473,6 +475,16 @@ export async function runDiscovery(
   opts: { fetcher?: Fetcher; maxNew?: number; today?: string; sites?: boolean; siteBudgetMs?: number } = {},
 ): Promise<DiscoveryReport> {
   const sys = asSystem(ctx, "job-board-search");
+  const started = Date.now();
+  let dbMs = Infinity;
+  for (let i = 0; i < 3; i++) {
+    const t = Date.now();
+    await ctx.db.select({ k: settingsTable.key }).from(settingsTable).limit(1);
+    dbMs = Math.min(dbMs, Date.now() - t);
+  }
+  const secs = (ms: number) => Math.round(ms / 100) / 10;
+  let fetchMs = 0;
+  let sitesMs = 0;
   const today = opts.today ?? new Date().toISOString().slice(0, 10);
   const maxNew = opts.maxNew ?? 200;
   const settings = await getDiscoverySettings(ctx);
@@ -480,7 +492,9 @@ export async function runDiscovery(
   const allBoards = await listBoards(ctx);
   const boards = allBoards.filter((b) => b.enabled);
 
-  const results = await pool(boards, 8, async (b) => ({ b, res: await fetchBoard(b.ref, opts.fetcher) }));
+  const tFetch = Date.now();
+  const results = await pool(boards, 16, async (b) => ({ b, res: await fetchBoard(b.ref, opts.fetcher) }));
+  fetchMs = Date.now() - tFetch;
   const report: DiscoveryReport = {
     finishedAt: "",
     boardsChecked: 0,
@@ -584,6 +598,7 @@ export async function runDiscovery(
 
   // 3. Remote-job sites → companies you don't watch yet → confirmed on their own careers board.
   if (opts.sites !== false) {
+    const tSites = Date.now();
     const siteKeys = (Object.keys(SITES) as Site[]).filter((site) => !settings.offSites.includes(site));
     const general = /^(anywhere|worldwide|global|international|apac|asia|emea|latam|remote)$/i;
     const country = settings.regionWords.find((w) => !general.test(w.trim()));
@@ -647,6 +662,7 @@ export async function runDiscovery(
       return { name, e, hit: null, tried: true };
     });
 
+    sitesMs = Date.now() - tSites;
     const foundBoards = [...settings.foundBoards];
     for (const t of tries) {
       if (t.tried) report.companiesTried!++;
@@ -677,6 +693,8 @@ export async function runDiscovery(
   }
 
   report.finishedAt = new Date().toISOString();
+  const total = Date.now() - started;
+  report.timing = { boards: secs(fetchMs), sites: secs(sitesMs), saving: secs(total - fetchMs - sitesMs), total: secs(total), dbMs };
   // Internal bookkeeping (the summary shown on the page) — not an owner setting, so no permission or history entry.
   await saveInternal(ctx, K.last, report);
   const via = report.companiesConfirmed?.length ? `, ${report.companiesConfirmed.length} new companies found through remote-job sites` : "";
