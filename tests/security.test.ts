@@ -6,12 +6,12 @@ import {
   getUser,
   newRecoveryCode,
   newSessionToken,
-  noteTry,
   OWNER_ID,
   resetWithRecoveryCode,
   sessionUser,
   signOutEverywhere,
-  tooManyTries,
+  reserveTry,
+  clearTries,
 } from "@/lib/auth";
 import { safeNext } from "@/lib/safe-next";
 import { runAiTool } from "@/services/ai-tools";
@@ -47,13 +47,19 @@ describe("security", () => {
     expect(await aiKeyWorkspace(db, key)).toBeNull();
   });
 
-  it("slows down password guessing after 10 wrong tries, counting tries sent at once — per account", async () => {
+  it("slows down guessing per account and connection, counting tries sent at once", async () => {
     const { db } = await testCtx();
-    await Promise.all(Array.from({ length: 10 }, () => noteTry(db, "", false)));
-    expect(await tooManyTries(db, "")).toBe(true);
-    expect(await tooManyTries(db, "someone@example.com")).toBe(false);
-    await noteTry(db, "", true);
-    expect(await tooManyTries(db, "")).toBe(false);
+    const now = Date.now();
+    const burst = await Promise.all(Array.from({ length: 25 }, () => reserveTry(db, OWNER_ID, "1.1.1.1", now)));
+    expect(burst.filter(Boolean)).toHaveLength(10); // no more than 10, however many arrive together
+    expect(await reserveTry(db, OWNER_ID, "1.1.1.1", now + 1000)).toBe(false);
+    // Someone else's guessing doesn't lock the real person out from their own connection.
+    expect(await reserveTry(db, OWNER_ID, "2.2.2.2", now + 1000)).toBe(true);
+    // One try a minute after that.
+    expect(await reserveTry(db, OWNER_ID, "1.1.1.1", now + 61_000)).toBe(true);
+    expect(await reserveTry(db, OWNER_ID, "1.1.1.1", now + 62_000)).toBe(false);
+    await clearTries(db, OWNER_ID, "1.1.1.1");
+    expect(await reserveTry(db, OWNER_ID, "1.1.1.1")).toBe(true);
   });
 
   it("starts the scheduled search once, however many requests arrive together", async () => {

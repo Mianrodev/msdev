@@ -14,7 +14,7 @@ import { getDb } from "@/db/client";
 import { users } from "@/db/schema";
 import { OWNER_ID } from "@/lib/auth";
 import { ensureWorkspace, type Ctx } from "@/services/context";
-import { claimScheduledRun, lastDiscovery, runDiscovery } from "@/services/discovery";
+import { claimScheduledRun, lastDiscovery, releaseScheduledRun, runDiscovery } from "@/services/discovery";
 import { runUpdate } from "@/services/run-update";
 
 export const dynamic = "force-dynamic";
@@ -57,7 +57,8 @@ export async function GET(req: NextRequest) {
       await runUpdate(ctx);
       done.push({ newLeads: search.newLeads, closed: search.closed });
     } catch {
-      // One space's problem never stops the others.
+      // One space's problem never stops the others; it's tried again on the next daily run.
+      await releaseScheduledRun(ctx).catch(() => undefined);
     }
   }
   return NextResponse.json({ ok: true, searched: done.length, skipped, newLeads: done.reduce((n, d) => n + d.newLeads, 0) });

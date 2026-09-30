@@ -301,6 +301,11 @@ export async function claimScheduledRun(ctx: Ctx, hours: number, now = Date.now(
   return rows.length === 1;
 }
 
+/** Give back a claim (the run failed), so the next daily run tries this space again. */
+export async function releaseScheduledRun(ctx: Ctx): Promise<void> {
+  await saveInternal(ctx, K.scheduled, { at: 0 });
+}
+
 /** App bookkeeping (not an owner setting): written directly, no permission check or history entry. */
 async function saveInternal(ctx: Ctx, key: string, value: unknown) {
   await ctx.db

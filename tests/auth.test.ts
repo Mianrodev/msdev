@@ -152,4 +152,30 @@ describe("team members", () => {
     expect(await signIn(db, "di@example.com", "dis password!!")).toBeNull();
     expect(await signIn(db, "di@example.com", "a fresh password")).not.toBeNull();
   });
+
+  it("an owner email that's already invited is refused, and a clash never uses up the link", async () => {
+    const { db } = await testCtx();
+    await createFirstPassword(db, "correct horse battery");
+    const { token } = await createInvite(db, { email: "ed@example.com", name: "Ed", createdBy: OWNER_ID });
+    expect(await saveOwnerEmail(db, "ed@example.com")).toMatch(/invited someone/);
+    // Even if the owner had it first (e.g. saved before the invite), accepting fails cleanly…
+    await db.execute("update users set email = 'ed@example.com' where id = 'owner'");
+    expect(await acceptInvite(db, token!, "eds password!!")).toBeNull();
+    // …and nothing was half-made: the link is still unused, no extra space exists.
+    expect(await inviteFor(db, token!)).not.toBeNull();
+    expect(JSON.stringify(await db.execute("select count(*)::int as n from workspaces"))).toContain('"n":1');
+  });
+
+  it("password links stop working once the password is changed another way", async () => {
+    const { db } = await testCtx();
+    const { token } = await createInvite(db, { email: "fi@example.com", name: "Fi", createdBy: OWNER_ID });
+    const fi = (await acceptInvite(db, token!, "fis password!!"))!;
+    const link = await createResetLink(db, fi.id, OWNER_ID);
+    await changePassword(db, fi.id, "fis new password");
+    expect(await inviteFor(db, link)).toBeNull();
+    const link2 = await createResetLink(db, fi.id, OWNER_ID);
+    await setPersonActive(db, fi.id, false);
+    await setPersonActive(db, fi.id, true);
+    expect(await inviteFor(db, link2)).toBeNull();
+  });
 });

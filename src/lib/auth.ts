@@ -152,11 +152,20 @@ async function ownerByEmail(db: Db, e: string): Promise<UserRow | null> {
   return owner?.email === e ? owner : null;
 }
 
+let dummyHash: Promise<string> | undefined;
+
+/** Check a password for someone who may not exist, taking the same time either way (one scrypt). */
+export async function checkOrPretend(u: UserRow | null, password: string): Promise<boolean> {
+  if (u) return checkUserPassword(u, password);
+  dummyHash ??= hash("not a real password");
+  await matches(password, await dummyHash);
+  return false;
+}
+
 /** Check an email + password. Returns the person only if the password is right and the account is on. */
 export async function signIn(db: Db, email: string, password: string): Promise<UserRow | null> {
   const u = await findSignIn(db, email);
-  // Same work whether or not the person exists, so timing doesn't reveal who has an account.
-  const right = u ? await checkUserPassword(u, password) : (await matches(password, await hash("x")), false);
+  const right = await checkOrPretend(u, password);
   return u && right && u.status === "active" ? u : null;
 }
 
@@ -181,6 +190,14 @@ export async function signOutEverywhere(db: Db, userId: string): Promise<void> {
     .where(eq(users.id, userId));
 }
 
+/** Unused password links for this person stop working (after a password change, reset or switch-off). */
+async function expireResetLinks(db: Db, userId: string) {
+  await db
+    .update(invites)
+    .set({ expiresAt: nowIso(), updatedAt: nowIso() })
+    .where(and(eq(invites.userId, userId), sql`${invites.usedAt} is null`));
+}
+
 /** Change the password (caller must have verified the current one). Other sessions and the AI link end. */
 export async function changePassword(db: Db, userId: string, pw: string): Promise<void> {
   const u = await getUser(db, userId);
@@ -188,6 +205,7 @@ export async function changePassword(db: Db, userId: string, pw: string): Promis
   await db.update(users).set({ passwordHash: await hash(pw), updatedAt: nowIso() }).where(eq(users.id, userId));
   await signOutEverywhere(db, userId);
   await removeAiKey(db, u.workspaceId);
+  await expireResetLinks(db, userId);
 }
 
 export async function saveOwnerEmail(db: Db, email: string): Promise<string | null> {
@@ -196,6 +214,12 @@ export async function saveOwnerEmail(db: Db, email: string): Promise<string | nu
   if (e) {
     const [taken] = await db.select({ id: users.id }).from(users).where(eq(users.email, e)).limit(1);
     if (taken && taken.id !== OWNER_ID) return "Someone on your team already uses that email.";
+    const [invited] = await db
+      .select({ id: invites.id })
+      .from(invites)
+      .where(and(eq(invites.email, e), sql`${invites.usedAt} is null`, sql`${invites.expiresAt} > ${nowIso()}`))
+      .limit(1);
+    if (invited) return "You've invited someone with that email. Cancel that invite on the Team page first.";
   }
   await db.update(users).set({ email: e || null, updatedAt: nowIso() }).where(eq(users.id, OWNER_ID));
   return null;
@@ -203,31 +227,31 @@ export async function saveOwnerEmail(db: Db, email: string): Promise<string | nu
 
 // ---------------------------------------------------------------- guessing protection
 
-// After 10 wrong tries in a row for one account, only one try a minute until a right one.
+// Counted per account *and* connection: after 10 wrong tries, one try a minute from that connection.
+// Someone guessing from their own connection can't lock the real person out of theirs. Tries are
+// reserved atomically before the password is checked, so many sent at once still count.
 const FREE_TRIES = 10;
 const WAIT_MS = 60_000;
-const triesKey = (who: string) => `auth.loginFailures:${cleanEmail(who) || OWNER_ID}`;
+const triesKey = (userId: string, ip: string) => `auth.tries:${sha(`${userId}|${ip}`).slice(0, 32)}`;
 
-export async function tooManyTries(db: Db, who: string): Promise<boolean> {
-  const v = ((await readSetting(db, triesKey(who))) ?? {}) as { n?: number; at?: number };
-  return (v.n ?? 0) >= FREE_TRIES && Date.now() - (v.at ?? 0) < WAIT_MS;
-}
-
-export async function noteTry(db: Db, who: string, ok: boolean): Promise<void> {
-  const now = Date.now();
-  if (ok) {
-    await writeSetting(db, triesKey(who), { n: 0, at: now });
-    return;
-  }
+/** Reserve one try for this account from this connection. False = wait a minute. */
+export async function reserveTry(db: Db, userId: string, ip: string, now = Date.now()): Promise<boolean> {
   await ensureWorkspace(db);
-  // Counted in the database in one step, so tries sent at the same moment all count.
-  await db
+  const rows = await db
     .insert(settings)
-    .values({ workspaceId: DEFAULT_WORKSPACE_ID, key: triesKey(who), value: { n: 1, at: now } })
+    .values({ workspaceId: DEFAULT_WORKSPACE_ID, key: triesKey(userId, ip), value: { n: 1, at: now } })
     .onConflictDoUpdate({
       target: [settings.workspaceId, settings.key],
       set: { value: sql`jsonb_build_object('n', coalesce((${settings.value}->>'n')::int, 0) + 1, 'at', ${now}::bigint)` },
-    });
+      where: sql`coalesce((${settings.value}->>'n')::int, 0) < ${FREE_TRIES} or coalesce((${settings.value}->>'at')::bigint, 0) < ${now - WAIT_MS}`,
+    })
+    .returning({ key: settings.key });
+  return rows.length === 1;
+}
+
+/** A right password clears the count. */
+export async function clearTries(db: Db, userId: string, ip: string): Promise<void> {
+  await writeSetting(db, triesKey(userId, ip), { n: 0, at: Date.now() });
 }
 
 // ---------------------------------------------------------------- recovery codes
@@ -251,11 +275,15 @@ export async function newRecoveryCode(db: Db, userId: string): Promise<string> {
 /** Forgotten password: the right recovery code sets a new password. The code is then used up, and everyone is signed out. */
 export async function resetWithRecoveryCode(db: Db, email: string, code: string, pw: string): Promise<boolean> {
   const u = await findSignIn(db, email);
-  if (!u || u.status !== "active" || (u.id === OWNER_ID && process.env.APP_PASSWORD)) return false;
+  if (!u || u.status !== "active" || !u.recoveryHash || (u.id === OWNER_ID && process.env.APP_PASSWORD)) {
+    await checkOrPretend(null, code); // same time as a real check, so this doesn't reveal who has an account
+    return false;
+  }
   if (!cleanCode(code) || !(await matches(cleanCode(code), u.recoveryHash))) return false;
   await db.update(users).set({ passwordHash: await hash(pw), recoveryHash: null, updatedAt: nowIso() }).where(eq(users.id, u.id));
   await signOutEverywhere(db, u.id);
   await removeAiKey(db, u.workspaceId);
+  await expireResetLinks(db, u.id);
   return true;
 }
 
@@ -273,6 +301,7 @@ export async function setPersonActive(db: Db, userId: string, active: boolean): 
     .where(eq(users.id, userId));
   const u = await getUser(db, userId);
   if (u && !active) await removeAiKey(db, u.workspaceId);
+  await expireResetLinks(db, userId);
 }
 
 export async function listInvites(db: Db): Promise<InviteRow[]> {
@@ -347,20 +376,33 @@ export async function acceptInvite(db: Db, token: string, pw: string): Promise<U
   const resetting = inv.userId ? await getUser(db, inv.userId) : null;
   if (inv.userId && (!resetting || resetting.status !== "active")) return null;
   const userId = resetting?.id ?? randomUUID();
-  const claimed = await db
-    .update(invites)
-    .set({ usedAt: nowIso(), userId, updatedAt: nowIso() })
-    .where(and(eq(invites.id, inv.id), sql`${invites.usedAt} is null`, sql`${invites.expiresAt} > ${nowIso()}`))
-    .returning({ id: invites.id });
-  if (!claimed.length) return null;
+  if (!resetting) {
+    const [taken] = await db.select({ id: users.id }).from(users).where(eq(users.email, inv.email)).limit(1);
+    if (taken) return null;
+  }
+  const passwordHash = await hash(pw);
+  // All or nothing: the link is used up only if the account is made (or the password changed).
+  const done = await db.transaction(async (tx) => {
+    const claimed = await tx
+      .update(invites)
+      .set({ usedAt: nowIso(), userId, updatedAt: nowIso() })
+      .where(and(eq(invites.id, inv.id), sql`${invites.usedAt} is null`, sql`${invites.expiresAt} > ${nowIso()}`))
+      .returning({ id: invites.id });
+    if (!claimed.length) return false;
+    if (resetting) {
+      await tx.update(users).set({ passwordHash, recoveryHash: null, updatedAt: nowIso() }).where(eq(users.id, userId));
+      return true;
+    }
+    const workspaceId = `ws-${randomUUID()}`;
+    await tx.insert(workspaces).values({ id: workspaceId, name: `${inv.name}'s space` });
+    await tx.insert(users).values({ id: userId, email: inv.email, name: inv.name, role: "member", workspaceId, passwordHash });
+    return true;
+  });
+  if (!done) return null;
   if (resetting) {
-    await db.update(users).set({ passwordHash: await hash(pw), recoveryHash: null, updatedAt: nowIso() }).where(eq(users.id, userId));
     await signOutEverywhere(db, userId);
     await removeAiKey(db, resetting.workspaceId);
-    return getUser(db, userId);
+    await expireResetLinks(db, userId);
   }
-  const workspaceId = `ws-${randomUUID()}`;
-  await db.insert(workspaces).values({ id: workspaceId, name: `${inv.name}'s space` });
-  await db.insert(users).values({ id: userId, email: inv.email, name: inv.name, role: "member", workspaceId, passwordHash: await hash(pw) });
   return getUser(db, userId);
 }

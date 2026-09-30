@@ -15,14 +15,15 @@ import {
   inviteFor,
   newRecoveryCode,
   newSessionToken,
-  noteTry,
   OWNER_ID,
   passwordProblem,
   resetWithRecoveryCode,
   saveOwnerEmail,
   signIn,
   signOutEverywhere,
-  tooManyTries,
+  checkOrPretend,
+  clearTries,
+  reserveTry,
 } from "@/lib/auth";
 import { newAiKey, removeAiKey } from "@/lib/ai-key";
 import { safeNext } from "@/lib/safe-next";
@@ -31,7 +32,27 @@ import { seedDiscoveryRules } from "@/services/discovery";
 import { getSession, VIEW_COOKIE } from "@/services/request";
 import { seedDefaultRules } from "@/services/rules";
 
-const UNKNOWN = "unknown@accounts.invalid";
+/** The visitor's connection (Vercel puts it first in x-forwarded-for). */
+async function clientIp(): Promise<string> {
+  const h = await headers();
+  return (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || h.get("x-real-ip") || "local";
+}
+
+/**
+ * Check a password with guessing protection. For an email with no account there's nothing to
+ * protect: the same work is done and the same answer given, so nobody can tell which emails exist.
+ */
+async function guardedCheck(db: Awaited<ReturnType<typeof getDb>>, who: UserRow | null, password: string): Promise<"ok" | "wrong" | "wait"> {
+  if (!who) {
+    await checkOrPretend(null, password);
+    return "wrong";
+  }
+  const ip = await clientIp();
+  if (!(await reserveTry(db, who.id, ip))) return "wait";
+  if (!(await checkOrPretend(who, password)) || who.status !== "active") return "wrong";
+  await clearTries(db, who.id, ip);
+  return "ok";
+}
 const WAIT_MSG = "Too many wrong tries. Wait one minute, then try again.";
 const q = (s: string) => encodeURIComponent(s);
 
@@ -64,15 +85,14 @@ export async function loginAction(f: FormData) {
   const email = String(f.get("email") ?? "");
   const back = (msg: string) => `/login?error=${q(msg)}&next=${q(next)}${email ? `&email=${q(email)}` : ""}`;
   const db = await getDb();
-  // Tries are counted per account; all unknown emails share one counter (so guessing can't fill the database).
-  const who = (await findSignIn(db, email)) ? email : UNKNOWN;
-  if (await tooManyTries(db, who)) redirect(back(WAIT_MSG));
-  const user = await signIn(db, email, String(f.get("password") ?? ""));
-  await noteTry(db, who, !!user);
-  if (!user) {
+  const who = await findSignIn(db, email);
+  const result = await guardedCheck(db, who, String(f.get("password") ?? ""));
+  if (result === "wait") redirect(back(WAIT_MSG));
+  if (result === "wrong") {
     await new Promise((r) => setTimeout(r, 1000)); // slow down guessing
     redirect(back(email ? "Wrong email or password." : "Wrong password. (Team members: type your email too.)"));
   }
+  const user = who!;
   await startSession(user);
   redirect(next);
 }
@@ -115,14 +135,15 @@ export async function resetPasswordAction(f: FormData) {
   const problem = passwordProblem(pw, String(f.get("confirm") ?? ""));
   if (problem) redirect(back(problem));
   const db = await getDb();
-  const who = (await findSignIn(db, email)) ? email : UNKNOWN;
-  if (await tooManyTries(db, who)) redirect(back(WAIT_MSG));
+  const who = await findSignIn(db, email);
+  const ip = await clientIp();
+  if (who && !(await reserveTry(db, who.id, ip))) redirect(back(WAIT_MSG));
   const right = await resetWithRecoveryCode(db, email, String(f.get("code") ?? ""), pw);
-  await noteTry(db, who, right);
   if (!right) {
     await new Promise((r) => setTimeout(r, 1000)); // slow down guessing
     redirect(back("That recovery code isn't right (or it was already used). Check the email and each letter, then try again."));
   }
+  if (who) await clearTries(db, who.id, ip);
   const user = (await signIn(db, email, pw))!;
   await startSession(user);
   redirect(
@@ -152,11 +173,8 @@ type Made = { code?: string; error?: string } | null;
 /** Making a recovery code or AI link needs your password too, so a borrowed signed-in browser can't. */
 async function confirmed(f: FormData) {
   const session = await getSession();
-  const who = session.user.email ?? "";
-  if (await tooManyTries(session.ctx.db, who)) return { session, error: WAIT_MSG };
-  const right = await checkUserPassword(session.user, String(f.get("password") ?? ""));
-  await noteTry(session.ctx.db, who, right);
-  return { session, error: right ? null : "That password isn't right." };
+  const result = await guardedCheck(session.ctx.db, session.user, String(f.get("password") ?? ""));
+  return { session, error: result === "ok" ? null : result === "wait" ? WAIT_MSG : "That password isn't right." };
 }
 
 /** Shown once on screen; only a hash is kept. */
