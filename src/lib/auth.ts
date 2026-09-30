@@ -10,12 +10,13 @@
  * product goes multi-tenant.
  */
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import type { Db } from "@/db/client";
 import { settings } from "@/db/schema";
 import { DEFAULT_WORKSPACE_ID, ensureWorkspace } from "@/services/context";
+import { removeAiKey } from "./ai-key";
 import { signSession, verifySession } from "./session";
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
@@ -34,7 +35,7 @@ async function readSetting(db: Db, key: string): Promise<string | undefined> {
   return typeof row?.value === "string" ? row.value : undefined;
 }
 
-async function writeSetting(db: Db, key: string, value: string) {
+async function writeSetting(db: Db, key: string, value: unknown) {
   await ensureWorkspace(db);
   await db
     .insert(settings)
@@ -56,16 +57,52 @@ async function insertOnce(db: Db, key: string, value: string): Promise<boolean> 
   return inserted.length > 0;
 }
 
-let cachedSecret: string | undefined;
-
+// Read on every check (one quick query), so a new secret — after a password change or
+// "sign out everywhere" — takes effect on every server straight away.
 async function sessionSecret(db: Db): Promise<string> {
   if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET;
   if (process.env.APP_PASSWORD) return `crm:${process.env.APP_PASSWORD}`;
-  if (cachedSecret) return cachedSecret;
   await insertOnce(db, SECRET_KEY, randomBytes(32).toString("base64url"));
-  cachedSecret = await readSetting(db, SECRET_KEY);
-  if (!cachedSecret) throw new Error("Could not initialise session secret");
-  return cachedSecret;
+  const secret = await readSetting(db, SECRET_KEY);
+  if (!secret) throw new Error("Could not initialise session secret");
+  return secret;
+}
+
+/** Ends every signed-in session on every device (the caller signs the current person back in). */
+export async function signOutEverywhere(db: Db): Promise<void> {
+  await writeSetting(db, SECRET_KEY, randomBytes(32).toString("base64url"));
+}
+
+// Guessing protection: after 10 wrong tries in a row, only one try a minute until a right one.
+const FAILURES_KEY = "auth.loginFailures";
+const FREE_TRIES = 10;
+const WAIT_MS = 60_000;
+
+export async function tooManyTries(db: Db): Promise<boolean> {
+  const [row] = await db
+    .select()
+    .from(settings)
+    .where(and(eq(settings.workspaceId, DEFAULT_WORKSPACE_ID), eq(settings.key, FAILURES_KEY)))
+    .limit(1);
+  const v = (row?.value ?? {}) as { n?: number; at?: number };
+  return (v.n ?? 0) >= FREE_TRIES && Date.now() - (v.at ?? 0) < WAIT_MS;
+}
+
+export async function noteTry(db: Db, ok: boolean): Promise<void> {
+  await ensureWorkspace(db);
+  const now = Date.now();
+  if (ok) {
+    await writeSetting(db, FAILURES_KEY, { n: 0, at: now });
+    return;
+  }
+  // Counted in the database in one step, so tries sent at the same moment all count.
+  await db
+    .insert(settings)
+    .values({ workspaceId: DEFAULT_WORKSPACE_ID, key: FAILURES_KEY, value: { n: 1, at: now } })
+    .onConflictDoUpdate({
+      target: [settings.workspaceId, settings.key],
+      set: { value: sql`jsonb_build_object('n', coalesce((${settings.value}->>'n')::int, 0) + 1, 'at', ${now}::bigint)` },
+    });
 }
 
 export async function passwordIsSet(db: Db): Promise<boolean> {
@@ -115,6 +152,9 @@ export async function createFirstPassword(db: Db, pw: string): Promise<boolean> 
 /** Change the password (caller must have verified the current one). */
 export async function changePassword(db: Db, pw: string): Promise<void> {
   await writeSetting(db, PASSWORD_KEY, await hash(pw));
+  // Anyone else signed in (or holding the AI link) loses access.
+  await signOutEverywhere(db);
+  await removeAiKey(db);
 }
 
 // Recovery code: the way back in if the password is forgotten. Shown once, stored only as a hash.
@@ -141,6 +181,8 @@ export async function resetWithRecoveryCode(db: Db, code: string, pw: string): P
   if (!stored || !cleanCode(code) || !(await matches(cleanCode(code), stored))) return false;
   await writeSetting(db, PASSWORD_KEY, await hash(pw));
   await writeSetting(db, RECOVERY_KEY, "");
+  await signOutEverywhere(db);
+  await removeAiKey(db);
   return true;
 }
 

@@ -1,4 +1,4 @@
-import { changePasswordAction, makeRecoveryCodeAction } from "../login/actions";
+import { changePasswordAction, makeRecoveryCodeAction, signOutEverywhereAction } from "../login/actions";
 import { RecoveryCodeMaker, SubmitButton } from "@/components/client";
 import { Flash, PageHeader, type SearchParams } from "@/components/ui";
 import { hasRecoveryCode, MIN_PASSWORD_LENGTH, passwordManagedByHost } from "@/lib/auth";
@@ -32,6 +32,19 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
             : "If you forget your password, this code is the only way back in. Make it now and write it down somewhere safe."}
         </p>
         <RecoveryCodeMaker make={makeRecoveryCodeAction} hasCode={hasCode} />
+      </section>
+
+      <section className="card" style={{ marginBottom: "1.5rem" }}>
+        <h2 style={{ marginTop: 0 }}>Signed in somewhere else?</h2>
+        <p className="muted">
+          Used a shared or borrowed computer? This signs out every other device straight away. You stay signed in here.
+          (Changing your password does this too.)
+        </p>
+        <form action={signOutEverywhereAction}>
+          <SubmitButton className="" pending="Signing out other devices…" confirm="Sign out every other device?">
+            Sign out everywhere else
+          </SubmitButton>
+        </form>
       </section>
 
       <section className="card">

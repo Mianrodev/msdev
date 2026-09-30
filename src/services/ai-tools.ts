@@ -13,7 +13,8 @@ import { getAnswers } from "./answers";
 import { asSystem, type Ctx } from "./context";
 import { getDiscoverySettings, lastDiscovery } from "./discovery";
 import { listHistory } from "./history";
-import { countsByView, evaluateRecord, getRecord, listRecords, updateRecord, upsertLead } from "./records";
+import { dedupKey, normalizeText } from "@/core/dedup";
+import { countsByView, evaluateRecord, findByDedupKey, getRecord, listRecords, updateRecord, upsertLead } from "./records";
 
 export const AI_ACTOR = "your-ai";
 export const AI_ORIGIN = "ai";
@@ -193,7 +194,7 @@ export const AI_TOOLS: AiTool[] = [
   {
     name: "save_prepared_package",
     title: "Save a cover letter / answers to a lead",
-    description: "Save a tailored cover letter (brief) and/or application answers onto a lead, so the owner can copy them when applying. Replaces what's there. Only use true facts about the owner (from get_my_answers and existing briefs).",
+    description: "Save a tailored cover letter (brief) and/or application answers onto a lead, so the owner can copy them when applying. Any text it replaces is kept on the lead as an earlier version. Only use true facts about the owner (from get_my_answers and existing briefs).",
     inputSchema: {
       type: "object",
       properties: {
@@ -208,13 +209,28 @@ export const AI_TOOLS: AiTool[] = [
       const brief = s(a.brief);
       const answers = s(a.answers);
       if (!brief && !answers) throw new Error("Give a brief, answers, or both.");
-      const r = await updateRecord(
+      const r = await getRecord(ctx, s(a.id));
+      // Nothing is lost: text being replaced is kept on the lead as an earlier version.
+      const replaced = {
+        ...(brief && r.preparedBrief && r.preparedBrief !== brief ? { brief: r.preparedBrief } : {}),
+        ...(answers && r.preparedAnswers && r.preparedAnswers !== answers ? { answers: r.preparedAnswers } : {}),
+      };
+      const kept = Array.isArray(r.extra.earlierVersions) ? (r.extra.earlierVersions as unknown[]) : [];
+      await updateRecord(
         ctx,
-        s(a.id),
-        { ...(brief ? { preparedBrief: brief } : {}), ...(answers ? { preparedAnswers: answers } : {}) },
+        r.id,
+        {
+          ...(brief ? { preparedBrief: brief } : {}),
+          ...(answers ? { preparedAnswers: answers } : {}),
+          ...(Object.keys(replaced).length
+            ? { extra: { ...r.extra, earlierVersions: [{ at: new Date().toISOString(), ...replaced }, ...kept].slice(0, 20) } }
+            : {}),
+        },
         "Prepared material written by your AI",
       );
-      return `Saved on "${r.account} — ${r.opportunity}". The owner will see it on the lead's page with Copy buttons.`;
+      return `Saved on "${r.account} — ${r.opportunity}". The owner will see it on the lead's page with Copy buttons.${
+        Object.keys(replaced).length ? " The previous version is kept on the lead under 'Earlier versions'." : ""
+      }`;
     },
   },
   {
@@ -251,11 +267,20 @@ export const AI_TOOLS: AiTool[] = [
     run: async (ctx, a) => {
       const link = s(a.link);
       if (!/^https?:\/\//i.test(link)) throw new Error("The link must start with http:// or https://");
-      const { record, created } = await upsertLead(
+      const company = s(a.company);
+      const title = s(a.job_title);
+      if (!company || !title) throw new Error("Give the company and the job title.");
+      // An existing lead is never changed from here — not even merged — so nothing the owner wrote can be overwritten.
+      const same = (await listRecords(ctx, { q: title, limit: 200 })).find(
+        (r) => normalizeText(r.account) === normalizeText(company) && normalizeText(r.opportunity) === normalizeText(title),
+      );
+      const existing = same ?? (await findByDedupKey(ctx, dedupKey({ account: company, opportunity: title, sourceUrl: link })));
+      if (existing) return `Already in the tracker: "${existing.account} — ${existing.opportunity}" (id ${existing.id}). Nothing was changed. Use add_note to add information.`;
+      const { record } = await upsertLead(
         ctx,
         {
-          account: s(a.company),
-          opportunity: s(a.job_title),
+          account: company,
+          opportunity: title,
           sourceUrl: link,
           location: s(a.location) || undefined,
           sourceBoard: "Found by your AI",
@@ -265,9 +290,7 @@ export const AI_TOOLS: AiTool[] = [
         },
         AI_ORIGIN,
       );
-      return created
-        ? `Added "${record.account} — ${record.opportunity}" (id ${record.id}). It's on the owner's Being checked list.`
-        : `Already in the tracker: "${record.account} — ${record.opportunity}" (id ${record.id}). Nothing duplicated.`;
+      return `Added "${record.account} — ${record.opportunity}" (id ${record.id}). It's on the owner's Being checked list.`;
     },
   },
 ];

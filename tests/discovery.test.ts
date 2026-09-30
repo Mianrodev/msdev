@@ -171,7 +171,7 @@ describe("finding leads", () => {
     expect(found.map((r) => r.opportunity).sort()).toEqual(["Implementation Specialist", "Onboarding Manager"]);
     for (const r of found) {
       expect(r.sourceUrl).toMatch(/^https:\/\/job-boards\.greenhouse\.io\/globex\/jobs\//); // the company's page, not the job site
-      expect(r.attributes.genuine).toMatch(/^YES — first seen on Remotive, then confirmed on Globex's own careers page/);
+      expect(r.attributes.genuine).toMatch(/^YES — first seen on Remotive, then found on a Greenhouse careers page under the name "Globex" listing the same job/);
     }
     expect((await listBoards(ctx)).find((b) => b.company === "Globex")).toMatchObject({ foundVia: "Remotive", enabled: true });
 
@@ -184,9 +184,60 @@ describe("finding leads", () => {
     expect(rep2.notConfirmed?.map((n) => n.company)).toEqual(["Initech"]);
   });
 
-  it("recognises scam warning signs", () => {
-    expect(warningSigns("Apply via Telegram")).not.toHaveLength(0);
-    expect(warningSigns("A one-time training fee applies")).not.toHaveLength(0);
-    expect(warningSigns("You will own the implementation of our CRM for customers in India.")).toHaveLength(0);
+  it("recognises scam warning signs, without flagging ordinary job text", () => {
+    for (const scam of [
+      "Apply via Telegram",
+      "Message us on WhatsApp. Small registration fee required.",
+      "WhatsApp: +91 90000 00000",
+      "A one-time training fee applies",
+      "You pay a refundable deposit for the laptop.",
+      "Salary paid in USDT every week.",
+      "No interview needed, hired instantly!",
+      "We will send you a cheque to buy equipment.",
+    ])
+      expect(warningSigns(scam), scam).not.toHaveLength(0);
+    for (const fine of [
+      "You will own the implementation of our CRM for customers in India.",
+      "Integrates HubSpot with the WhatsApp Business API and Telegram bots.",
+      "We will never ask for an application fee or contact you via WhatsApp.",
+      "Automate workflows that send payment reminders.",
+      "Background check required. Home office equipment stipend.",
+      "Build our Bitcoin payments infrastructure.",
+      "Beware of scams: we never ask candidates to pay a fee.",
+    ])
+      expect(warningSigns(fine), fine).toHaveLength(0);
+  });
+
+  it("isn't stopped by a badly formed link, and checks closed jobs whose link is on the company's own site", async () => {
+    const ctx = await testCtx();
+    expect(detectBoard("https://www.linkedin.com/jobs/view/50%-off")).toBeNull();
+    await upsertLead(ctx, { account: "Odd", opportunity: "Something", sourceUrl: "https://example.com/jobs/100%-remote" });
+    // Saved from the company's own site; the posting lives on its Greenhouse board.
+    const saved = (await upsertLead(ctx, { account: "Globex", opportunity: "Onboarding Manager", sourceUrl: "https://globex.example/careers?gh_jid=12" })).record;
+    await addBoard(ctx, "https://job-boards.greenhouse.io/globex");
+    let open = true;
+    const gh = async (url: string) =>
+      url.startsWith("https://boards-api.greenhouse.io/v1/boards/globex/jobs")
+        ? { status: 200, json: async () => ({ jobs: open ? [{ id: 12, title: "Onboarding Manager", absolute_url: "https://globex.example/careers?gh_jid=12", location: { name: "Remote" } }] : [] }) }
+        : { status: 404, json: async () => ({}) };
+    await runDiscovery(ctx, { fetcher: gh, sites: false });
+    open = false;
+    const rep = await runDiscovery(ctx, { fetcher: gh, sites: false });
+    expect(rep.closed).toBe(1);
+    expect((await getRecord(ctx, saved.id)).attributes.verifiedOpen).toMatch(/^NO/);
+  });
+
+  it("doesn't list jobs at a company you already watch (under another name) as unconfirmed", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    await upsertLead(ctx, { account: "Acme Labs", opportunity: "Ops", sourceUrl: "https://jobs.lever.co/acme/11111111-1111-1111-1111-111111111111" });
+    const f = async (url: string) =>
+      url.startsWith("https://remotive.com/")
+        ? { status: 200, json: async () => ({ jobs: [{ company_name: "Acme", title: "Implementation Specialist", candidate_required_location: "Worldwide", url: "https://remotive.com/x" }] }) }
+        : url.includes("/v0/postings/acme")
+          ? { status: 200, json: async () => [] }
+          : { status: 404, json: async () => ({}) };
+    const rep = await runDiscovery(ctx, { fetcher: f });
+    expect(rep.notConfirmedTotal).toBe(0);
   });
 });

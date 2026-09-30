@@ -453,7 +453,7 @@ export async function addBoardAction(f: FormData) {
     const b = await addBoard(ctx, str(f, "link"));
     if (!b) {
       throw new Error(
-        "That link isn't a job board the app can read yet. Paste a careers link from Lever (jobs.lever.co/…), Greenhouse (job-boards.greenhouse.io/…), Ashby (jobs.ashbyhq.com/…) or Workable (apply.workable.com/…).",
+        "That link isn't a job board the app can read yet. Paste a careers link from Lever (jobs.lever.co/…), Greenhouse (job-boards.greenhouse.io/…), Ashby (jobs.ashbyhq.com/…), Workable (apply.workable.com/…), Recruitee (name.recruitee.com) or SmartRecruiters (jobs.smartrecruiters.com/…).",
       );
     }
     return `Added. The next search will include this company's jobs.`;

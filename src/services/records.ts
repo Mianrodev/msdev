@@ -226,6 +226,10 @@ export async function updateRecord(ctx: Ctx, id: string, input: RecordInput, rea
     (patch as Record<string, unknown>)[f] = v;
     changed.push(f);
   }
+  if (data.extra && JSON.stringify(data.extra) !== JSON.stringify(existing.extra)) {
+    patch.extra = data.extra;
+    changed.push("extra");
+  }
   if (data.attributes) {
     const next = Object.fromEntries(
       Object.entries(data.attributes).map(([k, v]) => [k, isUnknown(v) ? "UNKNOWN" : v]),

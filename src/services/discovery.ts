@@ -21,9 +21,9 @@
  * New finds then go through the weekly check's automatic first look and wait
  * in "New to review" for the owner's yes / hold / no.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { records, settings as settingsTable, targetAccounts, type RecordRow } from "@/db/schema";
-import { normalizeText } from "@/core/dedup";
+import { normalizeText, normalizeUrl } from "@/core/dedup";
 import { containsTerm, evaluate, type RuleInput } from "@/core/rules";
 import {
   boardKey,
@@ -58,6 +58,8 @@ const K = {
   /** Companies already looked for, so a company without a findable board isn't retried every week. */
   probed: "discovery.probed",
   last: "discovery.lastRun",
+  /** When the scheduled (weekly) search last started. */
+  scheduled: "discovery.scheduledRun",
 } as const;
 
 /** Defaults taken from the tracker's own CONFIG (role focus, location, employment type). Editable on Find leads. */
@@ -279,6 +281,24 @@ export async function setSiteEnabled(ctx: Ctx, site: string, on: boolean) {
   const next = on ? s.offSites.filter((k) => k !== site) : [...new Set([...s.offSites, site])];
   const name = SITES[site as Site].name;
   await setSetting(ctx, K.offSites, next, on ? `${name} switched on` : `${name} switched off`);
+}
+
+/**
+ * Claim the scheduled search for the next `hours`. Atomic: when several requests arrive at
+ * once, exactly one gets true. Written before the search starts, so a slow run still counts.
+ */
+export async function claimScheduledRun(ctx: Ctx, hours: number, now = Date.now()): Promise<boolean> {
+  const cutoff = now - hours * 3_600_000;
+  const rows = await ctx.db
+    .insert(settingsTable)
+    .values({ workspaceId: ctx.workspaceId, key: K.scheduled, value: { at: now } })
+    .onConflictDoUpdate({
+      target: [settingsTable.workspaceId, settingsTable.key],
+      set: { value: { at: now }, updatedAt: new Date(now).toISOString() },
+      where: sql`coalesce((${settingsTable.value}->>'at')::bigint, 0) < ${cutoff}`,
+    })
+    .returning({ key: settingsTable.key });
+  return rows.length === 1;
 }
 
 /** App bookkeeping (not an owner setting): written directly, no permission check or history entry. */
@@ -525,12 +545,19 @@ export async function runDiscovery(
   // or the company posted it once per city.
   const sameJob = (company: string, title: string) => `${normalizeText(company)}|${normalizeText(title)}`;
   const knownJobs = new Set(all.map((r) => sameJob(r.account, r.opportunity)));
+  const byUrl = new Map<string, RecordRow[]>();
   for (const r of all) {
+    const keys = new Set<string>();
     for (const link of new Set([r.sourceUrl, r.nextStepUrl])) {
       const d = detectBoard(link);
-      if (!d?.postingId) continue;
-      const k = postingKey(d, d.postingId);
-      byPosting.set(k, [...(byPosting.get(k) ?? []), r]);
+      if (d?.postingId) keys.add(postingKey(d, d.postingId));
+    }
+    // Found jobs remember their board posting, even when the link is on the company's own site (e.g. ?gh_jid=…).
+    if (typeof r.extra.boardPosting === "string") keys.add(r.extra.boardPosting);
+    for (const k of keys) byPosting.set(k, [...(byPosting.get(k) ?? []), r]);
+    if (!keys.size && r.sourceUrl) {
+      const u = normalizeUrl(r.sourceUrl);
+      byUrl.set(u, [...(byUrl.get(u) ?? []), r]);
     }
   }
 
@@ -540,6 +567,22 @@ export async function runDiscovery(
     report.boardsChecked++;
     report.jobsSeen += postings.length;
     const openIds = new Set(postings.map((p) => postingKey(ref, p.id)));
+
+    // Leads saved from a company-site link of a board posting: remember the posting, so next week's
+    // link check can tell when it closes.
+    for (const p of postings) {
+      const recs = p.url ? byUrl.get(normalizeUrl(p.url)) : undefined;
+      if (!recs) continue;
+      const k = postingKey(ref, p.id);
+      for (const r of recs) {
+        await sys.db
+          .update(records)
+          .set({ extra: { ...r.extra, boardPosting: k } })
+          .where(and(eq(records.workspaceId, sys.workspaceId), eq(records.id, r.id)));
+        byPosting.set(k, [...(byPosting.get(k) ?? []), r]);
+      }
+      byUrl.delete(normalizeUrl(p.url));
+    }
 
     // 1. Link check for existing leads on this board.
     for (const [k, recs] of byPosting) {
@@ -564,6 +607,11 @@ export async function runDiscovery(
       }
       if (report.newLeads >= maxNew) {
         report.capped = true;
+        continue;
+      }
+      // Even on a careers page, a listing showing scam signs is never added.
+      if (warningSigns(`${p.title}\n${p.summary ?? ""}`).length) {
+        report.warningSkipped!++;
         continue;
       }
       // Jobs that clearly fail your first-look rules (on-site, another region…) are counted, not added.
@@ -604,7 +652,7 @@ export async function runDiscovery(
     const country = settings.regionWords.find((w) => !general.test(w.trim()));
     const siteResults = await pool(siteKeys, 6, async (site) => ({
       site,
-      res: await fetchSite(site, { searchWords: settings.titleWords, country }, opts.fetcher),
+      res: await fetchSite(site, { searchWords: settings.titleWords, country, deadline: tSites + (opts.siteBudgetMs ?? 90_000) / 2 }, opts.fetcher),
     }));
     const watchedNames = new Set(allBoards.map((b) => normalizeText(b.company)));
     const watchedKeys = new Set(allBoards.map((b) => b.key));
@@ -621,10 +669,12 @@ export async function runDiscovery(
         if (/^NO/.test(regionVerdict(l.location, settings.regionWords, settings.otherRegionWords, "remote"))) continue;
         const name = normalizeText(l.company);
         if (!name || watchedNames.has(name) || knownJobs.has(sameJob(l.company, l.title))) continue;
-        report.siteMatches!++;
         const e = byCompany.get(name) ?? { company: l.company, hints: new Set<string>(), listings: [] };
         if (l.companyHint) e.hints.add(l.companyHint);
-        if (!e.listings.some((x) => sameTitle(x.title, l.title))) e.listings.push(l);
+        if (!e.listings.some((x) => sameTitle(x.title, l.title))) {
+          e.listings.push(l);
+          report.siteMatches!++;
+        }
         byCompany.set(name, e);
       }
     }
@@ -650,10 +700,13 @@ export async function runDiscovery(
     for (const [name, e] of companies) if (!tryNames.has(name)) e.listings.forEach(notConfirmed);
 
     const deadline = Date.now() + (opts.siteBudgetMs ?? 90_000);
-    const tries = await pool(toTry, 6, async ([name, e]) => {
+    type Try = { name: string; e: (typeof toTry)[number][1]; hit: { ref: BoardRef; res: { company: string | null; postings: Posting[] } } | null; tried: boolean; watched?: boolean };
+    const tries = await pool(toTry, 6, async ([name, e]): Promise<Try> => {
       if (Date.now() > deadline) return { name, e, hit: null, tried: false };
       for (const ref of candidateBoards(e.company, [...e.hints])) {
-        if (watchedKeys.has(boardKey(ref))) continue;
+        // Already watched under another name: this search already reads it, nothing to confirm.
+        if (watchedKeys.has(boardKey(ref))) return { name, e, hit: null, tried: true, watched: true };
+        if (Date.now() > deadline) return { name, e, hit: null, tried: false };
         const res = await fetchBoard(ref, opts.fetcher);
         if (!res.ok || !res.postings.length) continue;
         // The board must really list one of the jobs — a board that merely shares the name doesn't count.
@@ -666,6 +719,7 @@ export async function runDiscovery(
     const foundBoards = [...settings.foundBoards];
     for (const t of tries) {
       if (t.tried) report.companiesTried!++;
+      if (t.watched) continue;
       if (!t.hit) {
         if (t.tried) probed[t.name] = { at: today, link: null };
         t.e.listings.forEach(notConfirmed);
@@ -742,7 +796,7 @@ function foundJobAttributes(board: BoardRef, company: string, p: Posting, s: Dis
     openToYourRegion: regionVerdict(p.location, s.regionWords, s.otherRegionWords, p.workplace),
     foundOn: via ? `${via}, confirmed on the company's ${provider} job board` : `${provider} job board`,
     genuine: via
-      ? `YES — first seen on ${via}, then confirmed on ${company}'s own careers page (${provider})`
+      ? `YES — first seen on ${via}, then found on a ${provider} careers page under the name "${company}" listing the same job`
       : `YES — posted on ${company}'s own careers page (${provider})`,
   };
   if (p.location) attributes.postingLocation = p.location;
@@ -765,7 +819,7 @@ async function addFoundJob(sys: Ctx, board: BoardRef, company: string, p: Postin
       location: p.location ? cut(p.location, 290) : undefined,
       dateFound: today,
       attributes,
-      extra: p.summary ? { postingSummary: p.summary } : undefined,
+      extra: { boardPosting: postingKey(board, p.id), ...(p.summary ? { postingSummary: p.summary } : {}) },
     },
     DISCOVERY_ORIGIN,
   );

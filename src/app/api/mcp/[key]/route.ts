@@ -76,6 +76,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
   }
   await ensureWorkspace(db);
   const ctx: Ctx = { db, workspaceId: DEFAULT_WORKSPACE_ID, actor: { kind: "system", process: "your-ai" } };
+  if (!body || typeof body !== "object" || (Array.isArray(body) && (!body.length || body.length > 20))) {
+    return NextResponse.json(fail(null, -32600, "Invalid request"), { status: 400 });
+  }
   const messages = (Array.isArray(body) ? body : [body]) as Rpc[];
   const out = [];
   for (const m of messages) {

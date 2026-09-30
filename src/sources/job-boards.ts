@@ -56,7 +56,17 @@ export function detectBoard(link: string | null | undefined): (BoardRef & { post
     return null;
   }
   const host = u.hostname.toLowerCase().replace(/^www\./, "");
-  const parts = u.pathname.split("/").filter(Boolean).map((p) => decodeURIComponent(p));
+  const parts = u.pathname
+    .split("/")
+    .filter(Boolean)
+    .map((p) => {
+      // A stray "%" (e.g. "/100%-remote") can't be decoded; keep it as typed rather than fail.
+      try {
+        return decodeURIComponent(p);
+      } catch {
+        return p;
+      }
+    });
   const [a, b, c] = parts;
   if (!a && !host.endsWith(".recruitee.com")) return null;
 

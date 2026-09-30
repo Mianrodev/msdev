@@ -56,7 +56,7 @@ async function json(fetcher: Fetcher, url: string): Promise<unknown> {
  */
 export async function fetchSite(
   site: Site,
-  { searchWords = [], country }: { searchWords?: string[]; country?: string } = {},
+  { searchWords = [], country, deadline = Infinity }: { searchWords?: string[]; country?: string; deadline?: number } = {},
   fetcher: Fetcher = defaultFetcher,
 ): Promise<SiteResult> {
   try {
@@ -83,6 +83,7 @@ export async function fetchSite(
         const seen = new Set<string>();
         for (const word of searchWords.slice(0, 12)) {
           for (let offset = 0; offset < 60; offset += 20) {
+            if (Date.now() > deadline) break; // keep what's found so far
             const q = new URLSearchParams({ q: word, offset: String(offset) });
             if (country) q.set("country", country);
             const d = (await json(fetcher, `https://himalayas.app/jobs/api/search?${q}`)) as { jobs?: Record<string, unknown>[] };
@@ -194,17 +195,32 @@ export async function fetchSite(
   }
 }
 
-/** Common signs of a fake job. Any hit keeps a listing out, whatever else it says. */
+/**
+ * Common signs of a fake job. Any hit keeps a listing out, whatever else it says. Each sign looks for
+ * the scam *behaviour* (being told to pay, or to move to a messaging app), and sentences that warn
+ * against it ("we will never ask for a fee") don't count.
+ */
 const WARNING_SIGNS: [RegExp, string][] = [
-  [/\b(whats\s?app|telegram|signal app|wechat)\b/i, "asks you to talk on a messaging app"],
-  [/\b(registration|training|application|processing|security|starter[- ]kit)\s+(fee|deposit|charges?)\b/i, "asks you to pay a fee"],
-  [/\b(pay|send|deposit|transfer)\s+(us|a|the)?\s*(fee|money|deposit|payment)\b/i, "asks you to pay"],
-  [/\b(crypto(currency)?|bitcoin|usdt|forex trading)\b.{0,40}\b(pay|salary|paid|earn)/i, "pays in crypto"],
-  [/\b(no interview|hired instantly|instant hire|guaranteed (job|income|placement))\b/i, "promises a job without an interview"],
-  [/\bearn\s+(\$|₹|rs\.?\s?)?\d[\d,]*\s*(per|a|\/)\s*(day|hour)\b.{0,40}\b(from home|easy|no experience)/i, "promises easy money"],
-  [/\b(check|cheque)\b.{0,40}\b(deposit|equipment|purchase)/i, "sends a cheque to buy equipment"],
+  [/\b(contact|message|reach|text|chat|apply|connect|add|dm)\b[^.!?\n]{0,40}\b(whats\s?app|telegram|wechat)\b/i, "asks you to talk on a messaging app"],
+  [/\b(whats\s?app|telegram)\s*(:|number|no\.?|at|@|\+)/i, "asks you to talk on a messaging app"],
+  [/\b(registration|training|application|processing|security|starter[- ]kit|onboarding)\s+(fee|deposit|charges?)\b/i, "asks you to pay a fee"],
+  [/\b(pay|send|transfer)\s+(us\s+)?(an?\s+)?(small\s+|one[- ]time\s+|refundable\s+)?(fee|deposit)\b/i, "asks you to pay"],
+  [/\b(salary|paid|pay|compensation)\b[^.!?\n]{0,30}\b(crypto(currency)?|bitcoin|usdt)\b/i, "pays in crypto"],
+  [/\bearn\s+(\$|₹|rs\.?\s?)?\d[\d,]*\s*(per|a|\/)\s*(day|hour)\b[^.!?\n]{0,40}\b(from home|easy|no experience)/i, "promises easy money"],
+  [/\b(send|mail)\s+you\s+a\s+(cheque|check)\b|\b(cheque|check)\s+(to|for)\s+(buy|purchas)/i, "sends a cheque to buy equipment"],
 ];
+/** Checked in every sentence: these phrases are the warning sign themselves ("no interview needed"). */
+const ALWAYS: [RegExp, string][] = [
+  [/\b(no interviews?( needed| required)?|hired instantly|instant hire|guaranteed (job|income|placement))\b/i, "promises a job without an interview"],
+];
+const WARNS_AGAINST = /\b(never|not|no|won't|don't|do not|will not|beware|scams?|fraud(ulent)?)\b/i;
 
 export function warningSigns(text: string): string[] {
-  return WARNING_SIGNS.filter(([re]) => re.test(text)).map(([, why]) => why);
+  const out = new Set<string>();
+  for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
+    for (const [re, why] of ALWAYS) if (re.test(sentence) && !/\b(never|beware|scams?)\b/i.test(sentence)) out.add(why);
+    if (WARNS_AGAINST.test(sentence)) continue;
+    for (const [re, why] of WARNING_SIGNS) if (re.test(sentence)) out.add(why);
+  }
+  return [...out];
 }

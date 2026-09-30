@@ -301,6 +301,38 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
         </section>
       )}
 
+      {/* ---------------- Earlier versions (text replaced by your AI is never lost) ---------------- */}
+      {Array.isArray(r.extra.earlierVersions) && r.extra.earlierVersions.length > 0 && (
+        <details className="card" style={{ marginBottom: "1rem" }}>
+          <summary>Earlier versions of the brief and answers ({r.extra.earlierVersions.length})</summary>
+          {(r.extra.earlierVersions as { at?: string; brief?: string; answers?: string }[]).map((v, i) => (
+            <div key={i} style={{ marginTop: ".8rem" }}>
+              <p className="small muted" style={{ margin: 0 }}>
+                Replaced {v.at ? fmtWhen(v.at) : ""}
+              </p>
+              {v.brief && (
+                <>
+                  <div className="spread">
+                    <h3 style={{ margin: 0 }}>Brief</h3>
+                    <CopyButton text={v.brief} />
+                  </div>
+                  <div className="package">{v.brief}</div>
+                </>
+              )}
+              {v.answers && (
+                <>
+                  <div className="spread">
+                    <h3 style={{ margin: 0 }}>Answers</h3>
+                    <CopyButton text={v.answers} />
+                  </div>
+                  <div className="package">{v.answers}</div>
+                </>
+              )}
+            </div>
+          ))}
+        </details>
+      )}
+
       {/* ---------------- Saved answers (same on every lead) ---------------- */}
       {list === "ready" && answers.length > 0 && (
         <details className="card" style={{ marginBottom: "1rem" }} open={!(r.preparedBrief || r.preparedAnswers)}>

@@ -74,9 +74,24 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
 }
 
 /** Makes a recovery code and shows it once — only a scrambled copy is stored, so it can't be shown again. */
-export function RecoveryCodeMaker({ make, hasCode }: { make: () => Promise<{ code: string }>; hasCode: boolean }) {
-  const [made, formAction] = useActionState(async () => make(), null);
-  if (made)
+type Made = { code?: string; error?: string } | null;
+
+/** "Type your password to continue" — for actions that must be really you. */
+function PasswordCheck({ error }: { error?: string }) {
+  return (
+    <>
+      {error && <div className="flash error">{error}</div>}
+      <label style={{ maxWidth: 320 }}>
+        Your password <span className="hint">(to confirm it&apos;s you)</span>
+        <input type="password" name="password" required autoComplete="current-password" />
+      </label>
+    </>
+  );
+}
+
+export function RecoveryCodeMaker({ make, hasCode }: { make: (prev: Made, f: FormData) => Promise<Made>; hasCode: boolean }) {
+  const [made, formAction] = useActionState(make, null);
+  if (made?.code)
     return (
       <div className="note stack">
         <strong>Your recovery code — write it down now</strong>
@@ -92,7 +107,8 @@ export function RecoveryCodeMaker({ make, hasCode }: { make: () => Promise<{ cod
       </div>
     );
   return (
-    <form action={formAction}>
+    <form action={formAction} className="stack">
+      <PasswordCheck error={made?.error} />
       <SubmitButton
         className={hasCode ? "" : "primary"}
         pending="Making your code…"
@@ -154,9 +170,9 @@ function AutoSubmitSelect({ name, defaultValue, choices }: { name: string; defau
 }
 
 /** Makes the private "Connect your AI" link and shows it once. */
-export function AiLinkMaker({ make, on }: { make: () => Promise<{ code: string }>; on: boolean }) {
-  const [made, formAction] = useActionState(async () => make(), null);
-  if (made)
+export function AiLinkMaker({ make, on }: { make: (prev: Made, f: FormData) => Promise<Made>; on: boolean }) {
+  const [made, formAction] = useActionState(make, null);
+  if (made?.code)
     return (
       <div className="note stack">
         <strong>Your private AI link — copy it now</strong>
@@ -173,7 +189,8 @@ export function AiLinkMaker({ make, on }: { make: () => Promise<{ code: string }
       </div>
     );
   return (
-    <form action={formAction}>
+    <form action={formAction} className="stack">
+      <PasswordCheck error={made?.error} />
       <SubmitButton
         className={on ? "" : "primary"}
         pending="Making your link…"
