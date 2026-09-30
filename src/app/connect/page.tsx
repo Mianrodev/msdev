@@ -4,7 +4,7 @@ import { AiLinkMaker, SubmitButton } from "@/components/client";
 import { fmtWhen } from "@/components/plain";
 import { Flash, PageHeader, type SearchParams } from "@/components/ui";
 import { aiLinkStatus } from "@/lib/ai-key";
-import { getCtx } from "@/services/request";
+import { getSession } from "@/services/request";
 import { AI_TOOLS } from "@/services/ai-tools";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +25,14 @@ const CANNOT = [
 
 export default async function ConnectPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
-  const ctx = await getCtx();
-  const status = await aiLinkStatus(ctx.db);
+  const { ctx, user, viewing } = await getSession();
+  if (viewing)
+    return (
+      <>
+        <PageHeader title="Your AI" intro={`AI links are made by each person for their own space. ${viewing.name} can make theirs here when signed in; switch back to your own space to manage yours.`} />
+      </>
+    );
+  const status = await aiLinkStatus(ctx.db, user.workspaceId);
   return (
     <>
       <Flash sp={sp} />

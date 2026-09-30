@@ -4,14 +4,14 @@ import { SubmitButton } from "@/components/client";
 import { ruleSentence, RuleFields, STEP_FROM } from "@/components/rule-form";
 import { Flash, PageHeader, type SearchParams } from "@/components/ui";
 import { listFieldNames } from "@/services/records";
-import { getCtx } from "@/services/request";
+import { getSession } from "@/services/request";
 import { listRules } from "@/services/rules";
 
 export const dynamic = "force-dynamic";
 
 export default async function RulesPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
-  const ctx = await getCtx();
+  const { ctx, user } = await getSession();
   const [rules, fieldNames] = await Promise.all([listRules(ctx), listFieldNames(ctx)]);
   const checks = rules.filter((r) => r.operator !== "note");
   const notes = rules.filter((r) => r.operator === "note");
@@ -32,6 +32,12 @@ export default async function RulesPage({ searchParams }: { searchParams: Search
           <div className="t">Password</div>
           <div className="d">Change your password and make a recovery code.</div>
         </Link>
+        {user.role === "owner" && (
+          <Link className="tile" href="/team">
+            <div className="t">Team</div>
+            <div className="d">Invite people to test the app, each in their own private space.</div>
+          </Link>
+        )}
         <Link className="tile" href="/discover">
           <div className="t">What to look for</div>
           <div className="d">The job titles, places and companies the search uses.</div>

@@ -140,11 +140,21 @@ export default function HelpPage() {
           </p>
         </div>
         <div className="card">
+          <h3>Can other people use it too?</h3>
+          <p>
+            Yes. The owner invites people on the <strong>Team</strong> page. Each person gets their own private space —
+            their own leads, search words, rules, answers and privacy details — and signs in with their email and password.
+            The owner can open anyone&apos;s space to help (a yellow bar shows whose space it is), and can switch an account
+            off without losing its data.
+          </p>
+        </div>
+        <div className="card">
           <h3>I forgot my password. What now?</h3>
           <p>
-            On the sign-in page, press <strong>Forgot your password?</strong>, type your recovery code and choose a new
-            password. No recovery code? Make one now on the <Link href="/account">Password</Link> page, so you&apos;re never
-            locked out.
+            On the sign-in page, press <strong>Forgot your password?</strong>, type your email (the owner can leave it empty)
+            and your recovery code, and choose a new password. No recovery code? Team members can ask the owner for a
+            password link. Make a code now on the <Link href="/account">Password</Link> page, so you&apos;re never locked
+            out.
           </p>
         </div>
         <div className="card">

@@ -15,6 +15,13 @@
       "when": 1790715998841,
       "tag": "0001_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790806456266,
+      "tag": "0002_people",
+      "breakpoints": true
     }
   ]
 }

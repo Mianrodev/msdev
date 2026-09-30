@@ -196,9 +196,22 @@ tests/          vitest: core rules, services, import (placeholder fixture only)
 
 Checks: `npm test`, `npm run typecheck`, `npm run lint`.
 
-### Multi-tenant later
+### Team accounts
 
-`src/services/request.ts#getCtx` is the single place that decides the workspace
-and actor. Replace the single-owner password (`src/lib/auth.ts`) with
-per-user accounts, and resolve each user's workspace there. Every query is
-already scoped by `workspace_id`.
+- **Owner**: created on first visit (password only; an email is optional) and
+  runs the `default` workspace. The migration `0002_people.sql` moves an
+  existing owner's password and recovery code into the `users` table.
+- **Members**: invited from the **Team** page with a one-time link
+  (`/join/<token>`, 7 days, only a SHA-256 of the token is stored). Accepting
+  creates the person and a private workspace seeded with the default rules.
+  They sign in with email + password.
+- `src/services/request.ts` resolves the signed-in person and their workspace
+  for every request; every query is scoped by `workspace_id`
+  (`tests/isolation.test.ts`). The owner can open a member's workspace
+  (`crm_view` cookie, owner only); changes there are recorded under the owner.
+- Sessions carry the person's id and sign-out counter (`session_epoch`):
+  "sign out everywhere", a password change, a password link or switching an
+  account off ends that person's sessions. Recovery codes, the guessing
+  throttle and AI links are per person/workspace.
+- The daily cron searches every active person's workspace on Mondays (as many
+  as fit in one run) and catches up missed ones on other days.

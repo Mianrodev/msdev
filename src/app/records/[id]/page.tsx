@@ -33,7 +33,7 @@ import { FIT_TIERS, SOURCE_VERIFICATION, VERDICTS } from "@/core/types";
 import { getAnswers } from "@/services/answers";
 import { listHistory } from "@/services/history";
 import { evaluateRecord, getRecord, NotFoundError, pendingDecision } from "@/services/records";
-import { getCtx } from "@/services/request";
+import { getSession, viewerFor } from "@/services/request";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +51,9 @@ const JOB_FACTS: [string, string][] = [
 export default async function LeadPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
   const { id } = await params;
   const sp = await searchParams;
-  const ctx = await getCtx();
+  const session = await getSession();
+  const ctx = session.ctx;
+  const viewer = await viewerFor(session);
   let r;
   try {
     r = await getRecord(ctx, id);
@@ -501,7 +503,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               {h.newStatus && h.priorStatus !== h.newStatus && <> → {statusPhrase(h.newStatus)}</>}
               <span className="muted">
                 {" "}
-                · {fmtWhen(h.occurredAt)} · {actorName(h.actor)}
+                · {fmtWhen(h.occurredAt)} · {actorName(h.actor, viewer)}
               </span>
               {h.reason && <div className="muted">{humanizeReason(h.reason)}</div>}
             </li>

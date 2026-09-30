@@ -6,7 +6,7 @@ import { ruleSentence, RuleFields } from "@/components/rule-form";
 import { BackLink, Flash, PageHeader, type SearchParams } from "@/components/ui";
 import { listHistory } from "@/services/history";
 import { listFieldNames } from "@/services/records";
-import { getCtx } from "@/services/request";
+import { getSession, viewerFor } from "@/services/request";
 import { getRule } from "@/services/rules";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,9 @@ export const dynamic = "force-dynamic";
 export default async function RulePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
   const { id } = await params;
   const sp = await searchParams;
-  const ctx = await getCtx();
+  const session = await getSession();
+  const ctx = session.ctx;
+  const viewer = await viewerFor(session);
   const rule = await getRule(ctx, id);
   if (!rule) notFound();
   const [hist, fieldNames] = await Promise.all([listHistory(ctx, { entityType: "rule", entityId: id }), listFieldNames(ctx)]);
@@ -48,7 +50,7 @@ export default async function RulePage({ params, searchParams }: { params: Promi
       <ul className="plain small">
         {hist.map((h) => (
           <li key={h.id}>
-            {h.reason} <span className="muted">· {fmtWhen(h.occurredAt)} · {actorName(h.actor)}</span>
+            {h.reason} <span className="muted">· {fmtWhen(h.occurredAt)} · {actorName(h.actor, viewer)}</span>
           </li>
         ))}
       </ul>

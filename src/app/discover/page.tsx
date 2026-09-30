@@ -118,7 +118,7 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
         </details>
       )}
 
-      <h2>What to look for</h2>
+      <h2 id="words">What to look for</h2>
       <form action={discoveryWordsAction} className="card stack">
         <p className="muted small" style={{ marginTop: 0 }}>
           One word or phrase per line. A job is added when its <strong>title</strong> contains any word from the first list

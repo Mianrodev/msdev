@@ -7,7 +7,7 @@ import { BackLink, Ext, Flash, type SearchParams } from "@/components/ui";
 import { getAccount } from "@/services/accounts";
 import { listHistory } from "@/services/history";
 import { NotFoundError } from "@/services/records";
-import { getCtx } from "@/services/request";
+import { getSession, viewerFor } from "@/services/request";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,9 @@ const STATUS_NAMES: Record<string, string> = { tracking: "Active", hold: "On hol
 export default async function CompanyPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
   const { id } = await params;
   const sp = await searchParams;
-  const ctx = await getCtx();
+  const session = await getSession();
+  const ctx = session.ctx;
+  const viewer = await viewerFor(session);
   let a;
   try {
     a = await getAccount(ctx, id);
@@ -141,7 +143,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
             <li key={h.id}>
               <strong>{eventName(h.event)}</strong>{" "}
               <span className="muted">
-                · {fmtWhen(h.occurredAt)} · {actorName(h.actor)}
+                · {fmtWhen(h.occurredAt)} · {actorName(h.actor, viewer)}
               </span>
               {h.reason && <div className="muted">{h.reason}</div>}
             </li>

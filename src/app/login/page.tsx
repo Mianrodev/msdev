@@ -1,7 +1,7 @@
 import { loginAction, resetPasswordAction, setupAction } from "./actions";
 import { one, type SearchParams } from "@/components/ui";
 import { getDb } from "@/db/client";
-import { MIN_PASSWORD_LENGTH, passwordIsSet, passwordManagedByHost } from "@/lib/auth";
+import { MIN_PASSWORD_LENGTH, passwordIsSet } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -44,10 +44,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
       ) : (
         <>
           <h1>Sign in</h1>
-          <p className="intro">Type the password you created when you first opened the app.</p>
+          <p className="intro">Team members: type your email and password. The owner can leave the email empty.</p>
           <form action={loginAction} className="card stack">
             {!forgot && error && <div className="flash error">{error}</div>}
             <input type="hidden" name="next" value={one(sp.next) ?? "/"} />
+            <label>
+              Email <span className="hint">(owner: optional)</span>
+              <input type="email" name="email" defaultValue={one(sp.email) ?? ""} autoComplete="username" />
+            </label>
             <label>
               Password
               <input type="password" name="password" autoFocus={!forgot} required autoComplete="current-password" />
@@ -56,7 +60,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
               Sign in
             </button>
           </form>
-          {!passwordManagedByHost() && (
+          {
             <details className="card" open={forgot} style={{ marginTop: "1rem" }}>
               <summary>Forgot your password?</summary>
               <p className="small muted">
@@ -64,6 +68,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
               </p>
               <form action={resetPasswordAction} className="stack">
                 {forgot && error && <div className="flash error">{error}</div>}
+                <label>
+                  Email <span className="hint">(owner: leave empty)</span>
+                  <input type="email" name="email" defaultValue={forgot ? (one(sp.email) ?? "") : ""} autoComplete="username" />
+                </label>
                 <label>
                   Recovery code
                   <input name="code" required autoComplete="off" spellCheck={false} placeholder="ABCD-EFGH-…" />
@@ -81,11 +89,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
                 </button>
               </form>
               <p className="small muted">
-                No recovery code? The app can&apos;t let anyone in without one — that&apos;s what keeps your data safe. Ask
-                whoever set up your hosting to reset the password for you.
+                No recovery code? Team members: ask the owner to invite you again. Owner: the app can&apos;t let anyone in without
+                one — that&apos;s what keeps your data safe.
               </p>
             </details>
-          )}
+          }
         </>
       )}
     </div>

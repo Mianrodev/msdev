@@ -5,7 +5,7 @@ import { describeRun, describeSearch, fmtWhen, LISTS, type ListKey } from "@/com
 import { lastDiscovery } from "@/services/discovery";
 import { Flash, PageHeader, type SearchParams } from "@/components/ui";
 import { countsByView } from "@/services/records";
-import { getCtx } from "@/services/request";
+import { getSession } from "@/services/request";
 import { listRuns, type RunSummary } from "@/services/run-update";
 import { getSetupStatus } from "@/services/setup";
 
@@ -20,6 +20,12 @@ const STEPS = {
     text: "If you ever forget your password, this code gets you back in. Make it and write it down.",
     href: "/account#recovery",
     button: "Make recovery code",
+  },
+  words: {
+    title: "Choose what jobs to look for",
+    text: "Type the job titles you want (e.g. \"sales operations\"), words to skip, and the places that work for you.",
+    href: "/discover#words",
+    button: "Choose words",
   },
   upload: {
     title: "Upload your tracker spreadsheet",
@@ -43,8 +49,8 @@ const STEPS = {
 
 export default async function Home({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
-  const ctx = await getCtx();
-  const [setup, counts, runs, search] = await Promise.all([getSetupStatus(ctx), countsByView(ctx), listRuns(ctx, 1), lastDiscovery(ctx)]);
+  const { ctx, user, viewing } = await getSession();
+  const [setup, counts, runs, search] = await Promise.all([getSetupStatus(ctx, viewing ?? user), countsByView(ctx), listRuns(ctx, 1), lastDiscovery(ctx)]);
   const lastRun = runs[0];
   const next = setup.steps.find((s) => !s.done)?.key;
   const tiles: { list: ListKey; n: number }[] = [

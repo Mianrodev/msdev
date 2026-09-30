@@ -1,5 +1,5 @@
 /**
- * Signed session tokens (HMAC-SHA256 over an expiry time). Pure Web Crypto,
+ * Signed session tokens (HMAC-SHA256 over an expiry time, the person and their sign-out counter). Pure Web Crypto,
  * so it runs anywhere. The signing secret is supplied by the caller (see
  * src/lib/auth.ts).
  */
@@ -26,19 +26,31 @@ function fromB64url(s: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-export async function signSession(secret: string, now = Date.now()): Promise<string> {
-  const exp = String(now + SESSION_DAYS * 86_400_000);
-  const sig = await crypto.subtle.sign("HMAC", await hmacKey(secret), enc.encode(exp));
-  return `${exp}.${b64url(sig)}`;
+export interface SessionClaims {
+  userId: string;
+  /** The person's sign-out counter when the session was made; bumping it ends every session. */
+  epoch: number;
 }
 
-export async function verifySession(secret: string, token: string | undefined, now = Date.now()): Promise<boolean> {
-  if (!token || !secret) return false;
-  const [exp, sig] = token.split(".");
-  if (!exp || !sig || !/^\d+$/.test(exp) || Number(exp) < now) return false;
+/** Token: "{expiry}.{userId}.{epoch}.{signature}", signed over everything before the signature. */
+export async function signSession(secret: string, claims: SessionClaims, now = Date.now()): Promise<string> {
+  if (!/^[A-Za-z0-9_-]+$/.test(claims.userId)) throw new Error("Bad user id");
+  const body = `${now + SESSION_DAYS * 86_400_000}.${claims.userId}.${claims.epoch}`;
+  const sig = await crypto.subtle.sign("HMAC", await hmacKey(secret), enc.encode(body));
+  return `${body}.${b64url(sig)}`;
+}
+
+/** The claims of a genuine, unexpired token — or null. (Whether the person is still allowed in is checked by the caller.) */
+export async function verifySession(secret: string, token: string | undefined, now = Date.now()): Promise<SessionClaims | null> {
+  if (!token || !secret) return null;
+  const parts = token.split(".");
+  if (parts.length !== 4) return null;
+  const [exp, userId, epoch, sig] = parts;
+  if (!/^\d+$/.test(exp) || Number(exp) < now || !/^[A-Za-z0-9_-]+$/.test(userId) || !/^\d+$/.test(epoch) || !sig) return null;
   try {
-    return await crypto.subtle.verify("HMAC", await hmacKey(secret), fromB64url(sig), enc.encode(exp));
+    const ok = await crypto.subtle.verify("HMAC", await hmacKey(secret), fromB64url(sig), enc.encode(`${exp}.${userId}.${epoch}`));
+    return ok ? { userId, epoch: Number(epoch) } : null;
   } catch {
-    return false;
+    return null;
   }
 }

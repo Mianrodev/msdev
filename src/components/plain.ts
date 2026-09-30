@@ -236,6 +236,7 @@ export function eventName(event: string): string {
     run: "Re-check run",
     run_update: "Weekly check run",
     job_board_search: "Job boards searched",
+    owner_opened_space: "The owner opened this space",
     company_board_found: "New company found",
     "import.state": "Imported",
     "import.history.reconciliation": "Old history (from spreadsheet)",
@@ -247,8 +248,18 @@ export function eventName(event: string): string {
   return map[event] ?? humanize(event);
 }
 
-export function actorName(actor: string): string {
-  if (actor.startsWith("human:")) return "You";
+/** Who did something, from the reader's point of view: "You", or the person's name. */
+export interface Viewer {
+  me: string;
+  names: Record<string, string>;
+}
+
+export function actorName(actor: string, viewer?: Viewer): string {
+  if (actor.startsWith("human:")) {
+    const id = actor.slice("human:".length);
+    if (!viewer || id === viewer.me) return "You";
+    return viewer.names[id] ?? "A team member";
+  }
   if (actor.startsWith("system:run-update")) return "Weekly check";
   if (actor.startsWith("system:reconciliation")) return "Weekly check";
   if (actor.startsWith("system:job-board-search")) return "Job board search";

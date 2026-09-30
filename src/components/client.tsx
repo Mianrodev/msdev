@@ -201,3 +201,66 @@ export function AiLinkMaker({ make, on }: { make: (prev: Made, f: FormData) => P
     </form>
   );
 }
+
+/** Invite a team member: shows their one-time link to send them. */
+export function InviteMaker({ make }: { make: (prev: Made, f: FormData) => Promise<Made> }) {
+  const [made, formAction] = useActionState(make, null);
+  return (
+    <div className="stack">
+      <form action={formAction} className="inline" key={made?.code ?? "form"}>
+        <label style={{ flex: "1 1 200px" }}>
+          Their name
+          <input name="name" required maxLength={120} placeholder="e.g. Anna" />
+        </label>
+        <label style={{ flex: "1 1 260px" }}>
+          Their email
+          <input name="email" type="email" required placeholder="anna@example.com" />
+        </label>
+        <SubmitButton pending="Making the invite…">Invite</SubmitButton>
+      </form>
+      {made?.error && <div className="flash error">{made.error}</div>}
+      {made?.code && (
+        <div className="note stack">
+          <strong>Invite link — send it to them now</strong>
+          <div className="recovery-code" style={{ fontSize: "1rem" }}>
+            {made.code}
+          </div>
+          <div>
+            <CopyButton text={made.code} label="Copy the link" />
+          </div>
+          <p className="small" style={{ margin: 0 }}>
+            Send it by email or chat. It works once, for 7 days. When they open it they choose their own password and get their
+            own private space. It won&apos;t be shown again — if it&apos;s lost, just invite them again.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A button that makes a one-time link and shows it (e.g. a password link for a team member). */
+export function LinkButton({ make, label, note }: { make: (prev: Made) => Promise<Made>; label: string; note: string }) {
+  const [made, formAction] = useActionState(make, null);
+  if (made?.code)
+    return (
+      <div className="note stack" style={{ maxWidth: 360 }}>
+        <div className="recovery-code" style={{ fontSize: ".85rem" }}>
+          {made.code}
+        </div>
+        <div>
+          <CopyButton text={made.code} label="Copy the link" />
+        </div>
+        <p className="small" style={{ margin: 0 }}>
+          {note}
+        </p>
+      </div>
+    );
+  return (
+    <form action={formAction}>
+      {made?.error && <div className="small" style={{ color: "var(--bad)" }}>{made.error}</div>}
+      <SubmitButton className="small" pending="Making the link…">
+        {label}
+      </SubmitButton>
+    </form>
+  );
+}

@@ -6,9 +6,9 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { getDb } from "@/db/client";
-import { aiKeyValid } from "@/lib/ai-key";
+import { aiKeyWorkspace } from "@/lib/ai-key";
 import { AI_TOOLS, runAiTool } from "@/services/ai-tools";
-import { DEFAULT_WORKSPACE_ID, ensureWorkspace, type Ctx } from "@/services/context";
+import type { Ctx } from "@/services/context";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -63,7 +63,8 @@ async function handle(ctx: Ctx, m: Rpc) {
 export async function POST(req: NextRequest, { params }: { params: Promise<{ key: string }> }) {
   const { key } = await params;
   const db = await getDb();
-  if (!(await aiKeyValid(db, key))) {
+  const workspaceId = await aiKeyWorkspace(db, key);
+  if (!workspaceId) {
     return NextResponse.json(fail(null, -32001, "This AI link is switched off or was replaced. Make a new one in the app (Your AI page)."), {
       status: 401,
     });
@@ -74,8 +75,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
   } catch {
     return NextResponse.json(fail(null, -32700, "Parse error"), { status: 400 });
   }
-  await ensureWorkspace(db);
-  const ctx: Ctx = { db, workspaceId: DEFAULT_WORKSPACE_ID, actor: { kind: "system", process: "your-ai" } };
+  // The link opens exactly one person's space.
+  const ctx: Ctx = { db, workspaceId, actor: { kind: "system", process: "your-ai" } };
   if (!body || typeof body !== "object" || (Array.isArray(body) && (!body.length || body.length > 20))) {
     return NextResponse.json(fail(null, -32600, "Invalid request"), { status: 400 });
   }

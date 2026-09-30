@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { aiKeyValid, newAiKey } from "@/lib/ai-key";
+import { aiKeyWorkspace, newAiKey } from "@/lib/ai-key";
 import {
   changePassword,
   createFirstPassword,
-  isValidSession,
+  getUser,
   newRecoveryCode,
   newSessionToken,
   noteTry,
+  OWNER_ID,
   resetWithRecoveryCode,
+  sessionUser,
   signOutEverywhere,
   tooManyTries,
 } from "@/lib/auth";
@@ -26,30 +28,32 @@ describe("security", () => {
   it("signing out everywhere, changing the password or resetting it ends other sessions and the AI link", async () => {
     const { db } = await testCtx();
     await createFirstPassword(db, "correct horse battery");
-    let token = await newSessionToken(db);
-    await signOutEverywhere(db);
-    expect(await isValidSession(db, token)).toBe(false);
+    const me = async () => (await getUser(db, OWNER_ID))!;
+    let token = await newSessionToken(db, await me());
+    await signOutEverywhere(db, OWNER_ID);
+    expect(await sessionUser(db, token)).toBeNull();
 
-    token = await newSessionToken(db);
-    let key = await newAiKey(db);
-    await changePassword(db, "another good password");
-    expect(await isValidSession(db, token)).toBe(false);
-    expect(await aiKeyValid(db, key)).toBe(false);
+    token = await newSessionToken(db, await me());
+    let key = await newAiKey(db, "default");
+    await changePassword(db, OWNER_ID, "another good password");
+    expect(await sessionUser(db, token)).toBeNull();
+    expect(await aiKeyWorkspace(db, key)).toBeNull();
 
-    token = await newSessionToken(db);
-    key = await newAiKey(db);
-    const code = await newRecoveryCode(db);
-    expect(await resetWithRecoveryCode(db, code, "third good password")).toBe(true);
-    expect(await isValidSession(db, token)).toBe(false);
-    expect(await aiKeyValid(db, key)).toBe(false);
+    token = await newSessionToken(db, await me());
+    key = await newAiKey(db, "default");
+    const code = await newRecoveryCode(db, OWNER_ID);
+    expect(await resetWithRecoveryCode(db, "", code, "third good password")).toBe(true);
+    expect(await sessionUser(db, token)).toBeNull();
+    expect(await aiKeyWorkspace(db, key)).toBeNull();
   });
 
-  it("slows down password guessing after 10 wrong tries, counting tries sent at once", async () => {
+  it("slows down password guessing after 10 wrong tries, counting tries sent at once — per account", async () => {
     const { db } = await testCtx();
-    await Promise.all(Array.from({ length: 10 }, () => noteTry(db, false)));
-    expect(await tooManyTries(db)).toBe(true);
-    await noteTry(db, true);
-    expect(await tooManyTries(db)).toBe(false);
+    await Promise.all(Array.from({ length: 10 }, () => noteTry(db, "", false)));
+    expect(await tooManyTries(db, "")).toBe(true);
+    expect(await tooManyTries(db, "someone@example.com")).toBe(false);
+    await noteTry(db, "", true);
+    expect(await tooManyTries(db, "")).toBe(false);
   });
 
   it("starts the scheduled search once, however many requests arrive together", async () => {

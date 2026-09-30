@@ -1,25 +1,31 @@
-import { changePasswordAction, makeRecoveryCodeAction, signOutEverywhereAction } from "../login/actions";
+import { changePasswordAction, makeRecoveryCodeAction, ownerEmailAction, signOutEverywhereAction } from "../login/actions";
 import { RecoveryCodeMaker, SubmitButton } from "@/components/client";
 import { Flash, PageHeader, type SearchParams } from "@/components/ui";
-import { hasRecoveryCode, MIN_PASSWORD_LENGTH, passwordManagedByHost } from "@/lib/auth";
-import { getCtx } from "@/services/request";
+import { hasRecoveryCode, MIN_PASSWORD_LENGTH, OWNER_ID, passwordManagedByHost } from "@/lib/auth";
+import { getSession } from "@/services/request";
 
 export const dynamic = "force-dynamic";
 
 export default async function AccountPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
-  const ctx = await getCtx();
-  if (passwordManagedByHost())
+  const { ctx, user } = await getSession();
+  const isOwner = user.id === OWNER_ID;
+  if (isOwner && passwordManagedByHost())
     return (
       <>
         <PageHeader title="Password" intro="Your password is set in the hosting settings, so it's changed there." />
       </>
     );
-  const hasCode = await hasRecoveryCode(ctx.db);
+  const hasCode = await hasRecoveryCode(ctx.db, user.id);
   return (
     <>
       <Flash sp={sp} />
       <PageHeader title="Password" intro="Change your password, and keep a recovery code in case you forget it." />
+      <p className="muted" style={{ marginTop: "-.4rem" }}>
+        Signed in as <strong>{user.name}</strong>
+        {user.email ? ` (${user.email})` : ""}
+        {isOwner ? " — the owner" : ""}.
+      </p>
 
       <section className="card" id="recovery" style={{ marginBottom: "1.5rem" }}>
         <h2 style={{ marginTop: 0 }}>
@@ -46,6 +52,22 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           </SubmitButton>
         </form>
       </section>
+
+      {isOwner && (
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <h2 style={{ marginTop: 0 }}>Your email (optional)</h2>
+          <p className="muted">
+            You can sign in with just your password. Add your email if you&apos;d like to sign in the same way as your team.
+          </p>
+          <form action={ownerEmailAction} className="inline">
+            <label style={{ flex: "1 1 280px" }}>
+              Email
+              <input name="email" type="email" defaultValue={user.email ?? ""} placeholder="you@example.com" />
+            </label>
+            <SubmitButton pending="Saving…">Save email</SubmitButton>
+          </form>
+        </section>
+      )}
 
       <section className="card">
         <h2 style={{ marginTop: 0 }}>Change password</h2>

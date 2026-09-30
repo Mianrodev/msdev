@@ -26,6 +26,49 @@ export const workspaces = pgTable("workspaces", {
   ...timestamps,
 });
 
+/**
+ * People who can sign in. The owner (id "owner") runs the default workspace and
+ * manages the team; each invited member gets a private workspace of their own.
+ */
+export const users = pgTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    /** Lower-cased. The owner may have none (they sign in with the password alone). */
+    email: text("email"),
+    name: text("name").notNull(),
+    role: text("role", { enum: ["owner", "member"] }).notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id),
+    passwordHash: text("password_hash").notNull(),
+    recoveryHash: text("recovery_hash"),
+    /** Bumped to sign this person out everywhere (part of every session token). */
+    sessionEpoch: integer("session_epoch").notNull().default(0),
+    status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
+    lastSignInAt: text("last_sign_in_at"),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("users_email_uq").on(t.email)],
+);
+
+/** One-time invite links. Only a hash of the token is stored. */
+export const invites = pgTable(
+  "invites",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdBy: text("created_by").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    usedAt: text("used_at"),
+    userId: text("user_id"),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("invites_token_uq").on(t.tokenHash)],
+);
+
 const workspaceId = () =>
   text("workspace_id")
     .notNull()
@@ -260,3 +303,6 @@ export type NewRecordRow = typeof records.$inferInsert;
 export type TargetAccountRow = typeof targetAccounts.$inferSelect;
 export type RuleRow = typeof rules.$inferSelect;
 export type HistoryRow = typeof history.$inferSelect;
+
+export type UserRow = typeof users.$inferSelect;
+export type InviteRow = typeof invites.$inferSelect;
