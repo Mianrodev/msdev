@@ -285,7 +285,7 @@ export function describeSearch(d: DiscoveryReport): string[] {
       ? `Found ${plural(d.newLeads, "new job")} matching your words and rules — they're in New to review.`
       : "No new matching jobs this time.",
   ];
-  if (d.filteredOut) lines.push(`Skipped ${plural(d.filteredOut, "matching job")} that fail your rules (on-site or another region).`);
+  if (d.filteredOut) lines.push(`Skipped ${plural(d.filteredOut, "matching job")} that fail your rules (not clearly remote, or another region).`);
   if (d.stillOpen || d.closed) {
     lines.push(`Checked your leads' links: ${d.stillOpen} still open, ${d.closed} no longer listed (closed).`);
   }
@@ -297,6 +297,10 @@ export function describeSearch(d: DiscoveryReport): string[] {
         : `Remote-job sites: no new companies confirmed this time.`,
     );
   }
+  if (d.pagesConfirmed)
+    lines.push(
+      `${plural(d.pagesConfirmed, "job")} confirmed by opening the job's own page on the company's careers system (Workday, BambooHR, their website…) and added.`,
+    );
   if (d.notConfirmedTotal)
     lines.push(`${plural(d.notConfirmedTotal, "job")} on remote-job sites couldn't be confirmed with the company, so ${d.notConfirmedTotal === 1 ? "it wasn't" : "they weren't"} added (see Find leads to check them yourself).`);
   if (d.warningSkipped) lines.push(`Dropped ${plural(d.warningSkipped, "listing")} showing scam warning signs.`);

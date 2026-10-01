@@ -362,3 +362,49 @@ describe("Remote only", () => {
     expect(v("Program Manager", "Anywhere (contract)")).toBe("YES");
   });
 });
+
+describe("Remote Rocketship and companies' own job pages", () => {
+  it("adds a job once its own page on the company's careers system shows it live", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    const page = (title: string) => ({ status: 200, json: async () => ({}), text: async () => `<html><head><meta property="og:title" content="${title}"></head></html>` });
+    const rr = (jobs: unknown[]) => ({
+      status: 200,
+      json: async () => ({}),
+      text: async () => `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { initialJobOpenings: jobs } } })}</script>`,
+    });
+    const job = (n: number, title: string, url: string, company: string) => ({
+      roleTitle: title, url, locationType: "remote", location: "India", slug: `job-${n}`, created_at: "2026-09-30T00:00:00Z", company: { name: company, slug: company.toLowerCase() },
+    });
+    const fetcher = async (url: string) => {
+      if (url.startsWith("https://www.remoterocketship.com/country/india/jobs/implementation"))
+        return rr([
+          job(1, "Implementation Manager", "https://harbourfreight.bamboohr.com/careers/12", "Harbour Freight"),
+          job(2, "Implementation Lead", "https://othercorp.bamboohr.com/careers/99", "Other Corp"),
+          job(3, "Implementation Analyst", "https://random-site.example/jobs/3", "Gizmo Ltd"),
+        ]);
+      if (url === "https://harbourfreight.bamboohr.com/careers/12") return page("Implementation Manager");
+      if (url === "https://othercorp.bamboohr.com/careers/99") return page("Current Openings"); // gone
+      return { status: 404, json: async () => ({}) };
+    };
+    const rep = await runDiscovery(ctx, { fetcher, today: "2026-09-30" });
+    expect(rep).toMatchObject({ newLeads: 1, pagesConfirmed: 1 });
+    const [r] = (await listRecords(ctx)).filter((x) => x.origin === "discovery");
+    expect(r).toMatchObject({ account: "Harbour Freight", opportunity: "Implementation Manager", sourceUrl: "https://harbourfreight.bamboohr.com/careers/12", sourceVerification: "verified" });
+    expect(r.attributes.genuine).toMatch(/own careers page \(BambooHR\)/);
+    expect(rep.notConfirmed?.map((n) => n.company).sort()).toEqual(["Gizmo Ltd", "Other Corp"]);
+  });
+});
+
+describe("careers system addresses", () => {
+  it("knows companies' careers systems and refuses odd addresses", async () => {
+    const { careersSystem } = await import("@/sources/job-sites");
+    expect(careersSystem("https://astreya.wd5.myworkdayjobs.com/x/job/1", "Astreya")).toBe("Workday");
+    expect(careersSystem("https://jobs.gainwelltechnologies.com/job/1", "Gainwell Technologies")).toBe("Company website");
+    expect(careersSystem("https://random-site.example/jobs/3", "Gizmo Ltd")).toBeNull();
+    expect(careersSystem("http://acme.bamboohr.com/careers/1", "Acme")).toBeNull();
+    expect(careersSystem("https://169.254.169.254/latest", "Metadata")).toBeNull();
+    expect(careersSystem("https://metadata.google.internal/x", "Metadata")).toBeNull();
+    expect(careersSystem("https://acme.bamboohr.com:8443/x", "Acme")).toBeNull();
+  });
+});

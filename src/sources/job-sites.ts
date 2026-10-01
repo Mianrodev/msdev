@@ -1,7 +1,8 @@
 /**
  * Read-only access to the free public feeds of remote-job sites (Remotive,
- * Himalayas, Workable's job search, Jobicy, RemoteOK, Working Nomads, We Work
- * Remotely). Workable is used by companies in every industry, not just tech.
+ * Himalayas, Workable's job search, Remote Rocketship, Jobicy, RemoteOK,
+ * Working Nomads, We Work Remotely). Workable is used by companies in every
+ * industry, not just tech; Remote Rocketship gives each job's own apply link.
  *
  * These sites are used to DISCOVER companies, never as proof a job is real:
  * a listing only counts once the same job is found on the company's own
@@ -10,12 +11,13 @@
  */
 import { defaultFetcher, plainText, type Fetcher } from "./job-boards";
 
-export type Site = "remotive" | "himalayas" | "workable" | "jobicy" | "remoteok" | "workingnomads" | "weworkremotely";
+export type Site = "remotive" | "himalayas" | "workable" | "remoterocketship" | "jobicy" | "remoteok" | "workingnomads" | "weworkremotely";
 
 export const SITES: Record<Site, { name: string; home: string }> = {
   remotive: { name: "Remotive", home: "https://remotive.com" },
   himalayas: { name: "Himalayas", home: "https://himalayas.app" },
   workable: { name: "Workable job search", home: "https://jobs.workable.com" },
+  remoterocketship: { name: "Remote Rocketship", home: "https://www.remoterocketship.com" },
   jobicy: { name: "Jobicy", home: "https://jobicy.com" },
   remoteok: { name: "RemoteOK", home: "https://remoteok.com" },
   workingnomads: { name: "Working Nomads", home: "https://www.workingnomads.com" },
@@ -34,6 +36,8 @@ export interface Listing {
   summary: string | null;
   /** The site's own short name for the company, a hint for finding its careers board. */
   companyHint?: string;
+  /** Where the site says to apply: usually the company's own careers system. */
+  applyUrl?: string;
 }
 
 export type SiteResult = { ok: true; listings: Listing[] } | { ok: false; error: string };
@@ -186,6 +190,47 @@ export async function fetchSite(
         const listings = [...found.values()].map(({ places, ...l }) => ({ ...l, location: places.size ? `Remote — ${[...places].join("; ")}` : "Remote" }));
         return { ok: true, listings: listings.filter(listing) };
       }
+      case "remoterocketship": {
+        // One public page per kind of job, for remote jobs open to your country (20 newest each).
+        // Each job names where to apply, which is usually the company's own careers system.
+        if (!country) return { ok: true, listings: [] };
+        const place = country.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        const out: Listing[] = [];
+        const seen = new Set<string>();
+        const slugs = [...new Set(searchWords.map((w) => w.toLowerCase().replace(/&/g, "and").replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")))];
+        for (const slug of slugs.filter((x) => x.length > 2)) {
+          if (Date.now() > deadline) break; // keep what's found so far
+          const res = await fetcher(`https://www.remoterocketship.com/country/${place}/jobs/${slug}`);
+          if (res.status === 429) break;
+          if (res.status !== 200 || !res.text) continue;
+          const m = /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/.exec(await res.text());
+          if (!m) continue;
+          let jobs: Record<string, unknown>[] = [];
+          try {
+            jobs = (JSON.parse(m[1]).props?.pageProps?.initialJobOpenings ?? []) as Record<string, unknown>[];
+          } catch {
+            continue;
+          }
+          for (const r of jobs) {
+            const co = (r.company ?? {}) as Record<string, unknown>;
+            const apply = str(r.url);
+            if (!apply || seen.has(apply) || str(r.locationType) !== "remote") continue;
+            seen.add(apply);
+            out.push({
+              site,
+              company: str(co.name),
+              title: str(r.roleTitle),
+              location: `Remote — ${str(r.location) || country}`,
+              url: str(co.slug) && str(r.slug) ? `https://www.remoterocketship.com/company/${str(co.slug)}/jobs/${str(r.slug)}` : apply,
+              postedAt: day(r.created_at),
+              summary: [str(r.twoLineJobDescriptionSummary), str(r.jobDescriptionSummary), str(r.employmentType) === "contract" ? "Contract role." : ""].filter(Boolean).join(" ") || null,
+              companyHint: str(co.slug) || undefined,
+              applyUrl: apply,
+            });
+          }
+        }
+        return { ok: true, listings: out.filter(listing) };
+      }
       case "jobicy": {
         const out: Listing[] = [];
         const seen = new Set<string>();
@@ -323,4 +368,75 @@ export function warningSigns(text: string): string[] {
     for (const [re, why] of WARNING_SIGNS) if (re.test(sentence)) out.add(why);
   }
   return [...out];
+}
+
+/**
+ * Careers systems companies post their own jobs on (beyond the job boards the app reads in full).
+ * A job page on one of these, or on a site whose address carries the company's name, is the company's own.
+ */
+const CAREERS_HOSTS: [RegExp, string][] = [
+  [/(^|\.)myworkdayjobs\.com$|(^|\.)myworkdaysite\.com$/, "Workday"],
+  [/(^|\.)bamboohr\.com$/, "BambooHR"],
+  [/(^|\.)breezy\.hr$/, "Breezy HR"],
+  [/(^|\.)zohorecruit\.(com|in|eu)$/, "Zoho Recruit"],
+  [/(^|\.)careers-page\.com$/, "Recruit CRM"],
+  [/(^|\.)jobvite\.com$/, "Jobvite"],
+  [/(^|\.)icims\.com$/, "iCIMS"],
+  [/(^|\.)teamtailor\.com$/, "Teamtailor"],
+  [/(^|\.)jobs\.personio\.(de|com)$/, "Personio"],
+  [/(^|\.)ats\.rippling\.com$/, "Rippling"],
+  [/(^|\.)pinpointhq\.com$/, "Pinpoint"],
+  [/(^|\.)app\.dover\.(com|io)$/, "Dover"],
+  [/(^|\.)applytojob\.com$/, "JazzHR"],
+  [/(^|\.)successfactors\.(com|eu)$/, "SuccessFactors"],
+  [/(^|\.)oraclecloud\.com$/, "Oracle"],
+  [/(^|\.)taleo\.net$/, "Taleo"],
+  [/(^|\.)jobs\.gem\.com$/, "Gem"],
+  [/(^|\.)freshteam\.com$/, "Freshteam"],
+  [/(^|\.)keka\.com$/, "Keka"],
+  [/(^|\.)darwinbox\.(in|com)$/, "Darwinbox"],
+  [/(^|\.)recruitee\.com$/, "Recruitee"],
+  [/(^|\.)workable\.com$/, "Workable"],
+];
+
+export function careersSystem(url: string, company: string): string | null {
+  let host: string;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:" || u.port || u.username) return null;
+    host = u.hostname.toLowerCase();
+    // Only ordinary public website names (no IP addresses or internal network names).
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(host) || /\.(internal|local|localhost|lan|home|corp)$/.test(host)) return null;
+  } catch {
+    return null;
+  }
+  for (const [re, name] of CAREERS_HOSTS) if (re.test(host)) return name;
+  // The company's own website: its name is in the address ("jobs.gainwelltechnologies.com" for Gainwell).
+  const words = company
+    .toLowerCase()
+    .replace(/\b(inc|llc|ltd|limited|gmbh|corp|corporation|co|company|plc|pvt|private|the|group|technologies|solutions)\b/g, " ")
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 4);
+  return words.length && words.some((w) => host.split(".").some((part) => part.includes(w))) ? "Company website" : null;
+}
+
+/**
+ * Open one job's page on the company's own careers system and check it's live with the same title.
+ * Answers the title the page shows, or null (gone, moved, a different job, or unreadable).
+ */
+export async function postingPageTitle(url: string, fetcher: Fetcher = defaultFetcher): Promise<string | null> {
+  try {
+    const res = await fetcher(url);
+    if (res.status !== 200 || !res.text) return null;
+    const page = (await res.text()).slice(0, 600_000);
+    if (/\b(no longer (available|accepting|open)|position (has been )?filled|job (posting )?(is )?(closed|expired)|this job (has )?expired)\b/i.test(page.slice(0, 200_000)))
+      return null;
+    const decode = (t: string) => t.replace(/&amp;/g, "&").replace(/&#39;|&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+    const og = /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["']/i.exec(page) ?? /<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:title["']/i.exec(page);
+    const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(page);
+    const h1 = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(page);
+    return [og?.[1], title?.[1], h1?.[1]?.replace(/<[^>]+>/g, " ")].map((t) => (t ? decode(t) : "")).filter(Boolean).join(" | ") || null;
+  } catch {
+    return null;
+  }
 }

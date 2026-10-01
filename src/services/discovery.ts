@@ -39,7 +39,7 @@ import {
   type Fetcher,
   type Posting,
 } from "@/sources/job-boards";
-import { fetchSite, SITES, warningSigns, type Listing, type Site } from "@/sources/job-sites";
+import { careersSystem, fetchSite, postingPageTitle, SITES, warningSigns, type Listing, type Site } from "@/sources/job-sites";
 import { asSystem, type Ctx } from "./context";
 import { BOARD_FRESH_MS, readCache, readCacheMany, writeCache } from "./source-cache";
 import { logHistory } from "./history";
@@ -503,6 +503,8 @@ export interface DiscoveryReport {
   /** Jobs seen on remote-job sites that couldn't be confirmed with the company (a sample). */
   notConfirmed?: { company: string; title: string; url: string; site: string; location: string | null }[];
   notConfirmedTotal?: number;
+  /** Jobs confirmed by opening the job's own page on the company's careers system (Workday, BambooHR…). */
+  pagesConfirmed?: number;
   /** Jobs dropped because they show scam warning signs. */
   warningSkipped?: number;
   /** How long each part took (seconds), and one database round trip (ms) — for spotting slow set-ups. */
@@ -534,6 +536,9 @@ const sameTitle = (a: string, b: string) => {
 /** A company looked for recently without finding its board isn't retried for this many days. */
 const RETRY_DAYS = 30;
 const MAX_COMPANIES_PER_SEARCH = 200;
+/** Job pages opened on companies' own careers systems per search, and how long a "not there" is remembered. */
+const MAX_PAGES_PER_SEARCH = 120;
+const PAGE_RETRY_MS = 7 * 86_400_000;
 
 export async function runDiscovery(
   ctx: Ctx,
@@ -615,6 +620,7 @@ export async function runDiscovery(
     companiesConfirmed: [],
     notConfirmed: [],
     notConfirmedTotal: 0,
+    pagesConfirmed: 0,
     warningSkipped: 0,
   };
 
@@ -753,7 +759,7 @@ export async function runDiscovery(
     });
     const watchedNames = new Set(allBoards.map((b) => normalizeText(b.company)));
     const watchedKeys = new Set(allBoards.map((b) => b.key));
-    const byCompany = new Map<string, { company: string; hints: Set<string>; listings: Listing[]; workable: boolean }>();
+    const byCompany = new Map<string, { company: string; hints: Set<string>; listings: Listing[]; workable: boolean; direct: BoardRef[] }>();
     for (const { site, res } of siteResults) {
       if (!res.ok) {
         report.sitesFailed!.push({ site: SITES[site].name, error: res.error });
@@ -766,9 +772,12 @@ export async function runDiscovery(
         if (/^NO/.test(regionVerdict(l.location, settings.regionWords, settings.otherRegionWords, "remote"))) continue;
         const name = normalizeText(l.company);
         if (!name || watchedNames.has(name) || knownJobs.has(sameJob(l.company, l.title))) continue;
-        const e = byCompany.get(name) ?? { company: l.company, hints: new Set<string>(), listings: [], workable: false };
+        const e = byCompany.get(name) ?? { company: l.company, hints: new Set<string>(), listings: [], workable: false, direct: [] as BoardRef[] };
         if (l.companyHint) e.hints.add(l.companyHint);
         if (l.site === "workable") e.workable = true;
+        // The site's apply link is on a job board the app reads whole: look there first.
+        const d = l.applyUrl ? detectBoard(l.applyUrl) : null;
+        if (d && !e.direct.some((b) => boardKey(b) === boardKey(d))) e.direct.push({ provider: d.provider, slug: d.slug, region: d.region });
         if (!e.listings.some((x) => sameTitle(x.title, l.title))) {
           e.listings.push(l);
           report.siteMatches!++;
@@ -777,7 +786,10 @@ export async function runDiscovery(
       }
     }
 
-    const notConfirmed = (l: Listing) => {
+    // Jobs not found on a board the app reads are kept for one more check (step 4) before being listed.
+    const leftover: Listing[] = [];
+    const notConfirmed = (l: Listing) => void leftover.push(l);
+    const listUnconfirmed = (l: Listing) => {
       if (warningSigns(`${l.title}\n${l.summary ?? ""}`).length) {
         report.warningSkipped!++;
         return;
@@ -818,7 +830,7 @@ export async function runDiscovery(
     const tries = await pool(toTry, 6, async ([name, e]): Promise<Try> => {
       if (Date.now() > deadline) return { name, e, hit: null, tried: false };
       let busy = false; // a board that said "slow down" isn't a board that doesn't exist: try again next time
-      for (const ref of [...knownBoard(name), ...candidateBoards(e.company, [...e.hints], { workable: e.workable })]) {
+      for (const ref of [...e.direct, ...knownBoard(name), ...candidateBoards(e.company, [...e.hints], { workable: e.workable })]) {
         // Already watched under another name: this search already reads it, nothing to confirm.
         if (watchedKeys.has(boardKey(ref))) return { name, e, hit: null, tried: true, watched: true };
         if (Date.now() > deadline) return { name, e, hit: null, tried: false };
@@ -864,6 +876,80 @@ export async function runDiscovery(
     }
     await saveInternal(ctx, K.foundBoards, foundBoards);
     await saveInternal(ctx, K.probed, probed);
+
+    // 4. Companies whose careers system can't be read whole (Workday, BambooHR, their own website…):
+    //    open the job's own page there. Live with the same title → genuine, and it's added.
+    const onCareers = (l: Listing) => !!l.applyUrl && !!careersSystem(l.applyUrl, l.company) && !knownJobs.has(sameJob(l.company, l.title));
+    const tried = await readCacheMany<{ title: string | null }>(ctx.db, leftover.filter(onCareers).map((l) => `page:${l.applyUrl}`), PAGE_RETRY_MS);
+    const pageTry = leftover.filter((l) => onCareers(l) && !tried.has(`page:${l.applyUrl}`)).slice(0, MAX_PAGES_PER_SEARCH);
+    const tryUrls = new Set(pageTry.map((l) => l.applyUrl));
+    for (const l of leftover) if (!tryUrls.has(l.applyUrl)) listUnconfirmed(l);
+    const pageDeadline = Date.now() + 60_000;
+    const pages = await pool(pageTry, 6, async (l) => ({ l, title: Date.now() > pageDeadline ? undefined : await postingPageTitle(l.applyUrl!, fetcher) }));
+    for (const { l, title } of pages) {
+      if (title === undefined) {
+        listUnconfirmed(l); // out of time: tried next search
+        continue;
+      }
+      await writeCache(ctx.db, `page:${l.applyUrl}`, { title });
+      const same = !!title && title.split(" | ").some((t) => sameTitle(t, l.title) || (normalizeText(l.title).length >= 5 && normalizeText(t).includes(normalizeText(l.title))));
+      if (!same || knownJobs.has(sameJob(l.company, l.title))) {
+        if (!same) listUnconfirmed(l);
+        continue;
+      }
+      if (report.newLeads >= maxNew) {
+        report.capped = true;
+        continue;
+      }
+      const system = careersSystem(l.applyUrl!, l.company)!;
+      const site = SITES[l.site].name;
+      const attributes: Record<string, unknown> = {
+        verifiedOpen: `YES — live on ${l.company}'s own careers page (checked ${today})`,
+        openToYourRegion: regionVerdict(l.location, settings.regionWords, settings.otherRegionWords, "remote"),
+        foundOn: `${site}, confirmed on the company's own careers page (${system})`,
+        genuine: `YES — first seen on ${site}, then opened on ${l.company}'s own careers page (${system}), which shows the same job`,
+        workplaceType: "remote",
+        remoteCheck: remoteVerdict({ title: l.title, location: l.location, workplace: "remote", summary: l.summary }),
+      };
+      if (l.location) attributes.postingLocation = l.location;
+      if (l.postedAt) attributes.postedOn = l.postedAt;
+      const firstLook = evaluate(rules, { account: l.company, opportunity: l.title, location: l.location, sourceBoard: system, ...attributes }, "screen");
+      if (firstLook.fails.length || /^NO/.test(String(attributes.remoteCheck))) {
+        report.filteredOut++;
+        continue;
+      }
+      if (warningSigns(`${l.title}\n${l.summary ?? ""}`).length) {
+        report.warningSkipped!++;
+        continue;
+      }
+      const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+      try {
+        const { record, created } = await upsertLead(
+          sys,
+          {
+            account: cut(l.company, 290),
+            opportunity: cut(l.title, 480),
+            sourceUrl: cut(l.applyUrl!, 1990),
+            sourceBoard: system,
+            location: l.location ? cut(l.location, 290) : undefined,
+            dateFound: today,
+            attributes,
+            extra: l.summary ? { postingSummary: l.summary } : {},
+          },
+          DISCOVERY_ORIGIN,
+        );
+        if (!created) continue;
+        await sys.db
+          .update(records)
+          .set({ sourceVerification: "verified", lastVerifiedAt: today })
+          .where(and(eq(records.workspaceId, sys.workspaceId), eq(records.id, record.id)));
+        report.newLeads++;
+        report.pagesConfirmed!++;
+        knownJobs.add(sameJob(l.company, l.title));
+      } catch {
+        report.skipped++;
+      }
+    }
   }
 
   report.finishedAt = new Date().toISOString();
