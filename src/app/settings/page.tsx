@@ -24,6 +24,10 @@ export default async function RulesPage({ searchParams }: { searchParams: Search
           <div className="t">Upload spreadsheet</div>
           <div className="d">Bring in (or update from) your Excel tracker.</div>
         </Link>
+        <Link className="tile" href="/about-me">
+          <div className="t">About me</div>
+          <div className="d">Your profile: roles you want, deal-breakers, pay, your voice. Your AI uses it.</div>
+        </Link>
         <Link className="tile" href="/privacy">
           <div className="t">Privacy</div>
           <div className="d">Personal details that must never appear in anything you share.</div>

@@ -21,7 +21,7 @@ import { runReconciliation } from "@/services/reconcile";
 import { runUpdate } from "@/services/run-update";
 import { describeSearch, humanize, OUTREACH_NAMES, SOURCE_NAMES, whereItIs } from "@/components/plain";
 import { addBoard, reviewFoundJob, runDiscovery, saveDiscoveryWords, setBoardEnabled, setSiteEnabled } from "@/services/discovery";
-import { saveAnswers } from "@/services/answers";
+import { saveAnswers, saveProfile } from "@/services/answers";
 import { savePrivacy, PRIVACY_FIELDS, type PrivacyDetails } from "@/services/privacy";
 import { createRule, IDENTITY_TERMS_KEY, setRuleEnabled, setSetting, updateRule } from "@/services/rules";
 import { getCtx } from "@/services/request";
@@ -387,6 +387,14 @@ export async function answersAction(f: FormData) {
     }
     const n = await saveAnswers(ctx, rows);
     return n ? `Saved ${n} ${n === 1 ? "answer" : "answers"}. They now show on every Ready lead with a Copy button.` : "Saved. You have no answers yet.";
+  });
+}
+
+export async function profileAction(f: FormData) {
+  const ctx = await getCtx();
+  await act("/about-me", async () => {
+    await saveProfile(ctx, str(f, "profile"));
+    return "Saved. Your AI (and Claude, when it helps you) will use this to judge jobs and write in your voice.";
   });
 }
 

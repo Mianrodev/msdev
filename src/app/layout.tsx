@@ -20,7 +20,7 @@ const LINKS = [
   { href: "/connect", label: "Your AI" },
   { href: "/history", label: "Activity" },
   { href: "/help", label: "Help" },
-  { href: "/settings", label: "Settings", also: ["/import", "/privacy", "/account"] },
+  { href: "/settings", label: "Settings", also: ["/import", "/privacy", "/account", "/about-me"] },
 ];
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

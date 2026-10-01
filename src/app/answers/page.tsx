@@ -65,7 +65,8 @@ export default async function AnswersPage({ searchParams }: { searchParams: Sear
           </div>
           <p className="small muted" style={{ margin: 0 }}>
             Need more boxes? Save, and two new empty ones appear. Your prepared briefs for specific leads are still on each
-            lead&apos;s page — <Link href="/records?list=ready">see your Ready leads</Link>.
+            lead&apos;s page — <Link href="/records?list=ready">see your Ready leads</Link>. Your longer profile (roles you
+            want, deal-breakers, your voice) goes on <Link href="/about-me">About me</Link>.
           </p>
         </form>
       </section>

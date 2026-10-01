@@ -9,7 +9,7 @@
  */
 import { applied, describeSearch, LIST_TO_VIEW, LISTS, listOf, OUTREACH_NAMES, TIER_NAMES, whereItIs, type ListKey } from "@/components/plain";
 import type { RecordRow } from "@/db/schema";
-import { getAnswers } from "./answers";
+import { getAnswers, getProfile } from "./answers";
 import { asSystem, type Ctx } from "./context";
 import { getDiscoverySettings, lastDiscovery } from "./discovery";
 import { listHistory } from "./history";
@@ -61,7 +61,8 @@ How it works:
 - Rules (remote-only, open to the owner's region, etc.) are applied automatically.
 
 Your role as the owner's AI assistant:
-- Help them decide and prepare: summarise leads, compare them against their saved answers and background, and write a
+- Read their profile first (get_my_profile): it is the source of truth for fit, deal-breakers and their voice.
+- Help them decide and prepare: summarise leads, compare them against their profile and saved answers, and write a
   tailored cover letter ("brief") and application answers with save_prepared_package. Only use facts from the lead, the
   listing and the owner's saved answers / existing briefs — never invent experience, numbers or employers.
 - You can add notes (add_note) and add jobs you find elsewhere, e.g. LinkedIn (add_lead). Always check a job is on the
@@ -174,6 +175,14 @@ export const AI_TOOLS: AiTool[] = [
       const answers = await getAnswers(ctx);
       return answers.length ? answers.map((x) => `## ${x.title}\n${x.text}`).join("\n\n") : "The owner hasn't saved any answers yet (My answers page).";
     },
+  },
+  {
+    name: "get_my_profile",
+    title: "The owner's profile (About me)",
+    description: "The owner's own profile: who they are, roles they want and don't want, deal-breakers, pay floor, experience, writing style, how they like to be helped. Read this before judging job fit or writing any application material — it is the source of truth about them.",
+    inputSchema: { type: "object", properties: {} },
+    readOnly: true,
+    run: async (ctx) => (await getProfile(ctx)) || "The owner hasn't written their profile yet (About me page, under Settings).",
   },
   {
     name: "get_last_search",

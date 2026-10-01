@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { acceptInvite, createFirstPassword, createInvite, OWNER_ID } from "@/lib/auth";
 import { aiKeyWorkspace, newAiKey } from "@/lib/ai-key";
 import { getAccount, listAccounts, upsertAccount } from "@/services/accounts";
-import { getAnswers, saveAnswers } from "@/services/answers";
+import { getAnswers, getProfile, saveAnswers, saveProfile } from "@/services/answers";
 import { runAiTool } from "@/services/ai-tools";
 import type { Ctx } from "@/services/context";
 import { getDiscoverySettings, listBoards, saveDiscoveryWords, DEFAULTS } from "@/services/discovery";
@@ -29,6 +29,7 @@ describe("each person's space is private", () => {
     const mine = (await upsertLead(owner, { account: "Acme", opportunity: "Implementation Specialist", sourceUrl: "https://jobs.lever.co/acme/11111111-1111-1111-1111-111111111111", notes: "owner secret" })).record;
     const acct = (await upsertAccount(owner, { name: "Owner Co", website: "https://owner.example" })).account;
     await saveAnswers(owner, [{ title: "Notice", text: "owner's notice period" }]);
+    await saveProfile(owner, "owner's private profile");
     await savePrivacy(owner, { name: "Owner Person", email: "", phone: "", profileUrl: "", city: "", employer: "", other: [] });
     await saveDiscoveryWords(owner, { titleWords: ["implementation"], skipWords: [], regionWords: ["India"], otherRegionWords: [] });
 
@@ -41,6 +42,7 @@ describe("each person's space is private", () => {
     expect(await listAccounts(anna)).toEqual([]);
     await expect(getAccount(anna, acct.id)).rejects.toThrow();
     expect(await getAnswers(anna)).toEqual([]);
+    expect(await getProfile(anna)).toBe("");
     expect((await getPrivacy(anna)).name ?? "").toBe("");
     expect((await getDiscoverySettings(anna)).titleWords).toEqual(DEFAULTS.titleWords);
     expect(await listBoards(anna)).toEqual([]);

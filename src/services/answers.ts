@@ -49,3 +49,24 @@ export async function saveAnswers(ctx: Ctx, answers: SavedAnswer[]): Promise<num
   );
   return kept.length;
 }
+
+// ---------------------------------------------------------------- About me
+
+const PROFILE_KEY = "profile.aboutMe";
+const MAX_PROFILE = 30_000;
+
+/**
+ * The person's own profile in their own words — background, target roles, deal-breakers, pay floor,
+ * writing style. Read by their AI (and Claude when helping) to judge fit and write in their voice.
+ * Private to their space, never exported, logged without its text.
+ */
+export async function getProfile(ctx: Ctx): Promise<string> {
+  const v = await getSetting<unknown>(ctx, PROFILE_KEY, "");
+  return typeof v === "string" ? v : "";
+}
+
+export async function saveProfile(ctx: Ctx, text: string): Promise<void> {
+  const t = text.replace(/\r\n/g, "\n").trim();
+  if (t.length > MAX_PROFILE) throw new Error(`Please keep it under ${MAX_PROFILE.toLocaleString("en-GB")} characters.`);
+  await setSetting(ctx, PROFILE_KEY, t, "About me updated");
+}
