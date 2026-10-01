@@ -504,7 +504,7 @@ const sameTitle = (a: string, b: string) => {
 
 /** A company looked for recently without finding its board isn't retried for this many days. */
 const RETRY_DAYS = 30;
-const MAX_COMPANIES_PER_SEARCH = 80;
+const MAX_COMPANIES_PER_SEARCH = 120;
 
 export async function runDiscovery(
   ctx: Ctx,
@@ -765,7 +765,15 @@ export async function runDiscovery(
       return d ? [{ provider: d.provider, slug: d.slug, region: d.region }] : [];
     };
     const companies = [...byCompany.entries()];
-    const toTry = companies.filter(([name]) => !triedRecently(name)).slice(0, MAX_COMPANIES_PER_SEARCH);
+    // Take companies from each site in turn, so one big site can't crowd out the others.
+    const queues = new Map<Site, typeof companies>();
+    for (const c of companies.filter(([name]) => !triedRecently(name))) {
+      const site = c[1].listings[0].site;
+      queues.set(site, [...(queues.get(site) ?? []), c]);
+    }
+    const toTry: typeof companies = [];
+    while (toTry.length < MAX_COMPANIES_PER_SEARCH && [...queues.values()].some((q) => q.length))
+      for (const q of queues.values()) if (q.length && toTry.length < MAX_COMPANIES_PER_SEARCH) toTry.push(q.shift()!);
     const tryNames = new Set(toTry.map(([name]) => name));
     for (const [name, e] of companies) if (!tryNames.has(name)) e.listings.forEach(notConfirmed);
 
