@@ -208,9 +208,9 @@ const REMOTE_WORDS = ["remote", "anywhere", "worldwide", "distributed", "work fr
 /** Words in a title, location or description that mean the job is NOT fully remote. */
 const NOT_REMOTE =
   /\b(hybrid|on-?site|in-?office|office[- ]based|in[- ]person|(\d|one|two|three|four)\s*(days?|x)\s*(a|per|\/|each)\s*week\s*(in|at|from)\s+(\S+\s+){0,3}?office)\b/i;
-/** Description phrases that say the job itself is remote (not just "a remote-first company" with offices). */
+/** Description phrases that say the job is remote (office days or hybrid elsewhere in it still win). */
 const SAYS_REMOTE =
-  /\b(fully[- ]remote|100\s*%\s*remote|remote[- ](role|position|job|opportunity|friendly)|this (role|position|job) is (fully )?remote|work(ing)? remotely|remote (from|within|in|across) (india|apac|asia|anywhere)|work from (home|anywhere)|telecommut\w*|home[- ]based|location:\s*remote)\b/i;
+  /\b(fully[- ]remote|all[- ]remote|remote[- ]first|100\s*%\s*remote|remote[- ](role|position|job|opportunity|friendly)|this (role|position|job) is (fully )?remote|work(ing)? remotely|remote (from|within|in|across) (india|apac|asia|anywhere)|work from (home|anywhere)|telecommut\w*|home[- ]based|location:\s*remote)\b/i;
 
 /**
  * Is this job really remote? Only clear evidence counts: the job board marks it remote, or the title,
