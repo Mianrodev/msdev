@@ -298,3 +298,34 @@ describe("Himalayas search", () => {
     expect(res.ok && res.listings.some((l) => l.title.startsWith("word14 "))).toBe(true);
   });
 });
+
+describe("Workable job search", () => {
+  it("merges one job posted for several countries and keeps the company's website as a hint", async () => {
+    const asked: string[] = [];
+    const job = (country: string) => ({
+      title: "Automation Lead",
+      url: `https://jobs.workable.com/view/x-${country}`,
+      created: "2026-09-30T10:00:00Z",
+      description: "<p>Own our process automation.</p>",
+      locations: ["TELECOMMUTE", country],
+      company: { title: "Harbour Freight Lines", website: "https://www.harbourfreight.example/" },
+    });
+    const fetcher = async (url: string) => {
+      asked.push(url);
+      if (asked.length > 2) return { status: 429, json: async () => ({}) };
+      return { status: 200, json: async () => ({ jobs: [job("India"), job("Philippines")] }) };
+    };
+    const res = await fetchSite("workable", { searchWords: ["automation", "operations", "systems"], country: "India" }, fetcher);
+    expect(asked[0]).toContain("location=India");
+    expect(asked[0]).toContain("workplace=remote");
+    expect(asked).toHaveLength(3); // stops politely when asked to slow down
+    expect(res.ok && res.listings).toEqual([
+      expect.objectContaining({ company: "Harbour Freight Lines", location: "Remote — India; Philippines", companyHint: "harbourfreight" }),
+    ]);
+  });
+
+  it("looks on the company's Workable page first for jobs found there", () => {
+    expect(candidateBoards("Harbour Freight Lines", ["harbourfreight"], { workable: true })[0]).toEqual({ provider: "workable", slug: "harbourfreight" });
+    expect(candidateBoards("Harbour Freight Lines").some((b) => b.provider === "workable")).toBe(false);
+  });
+});

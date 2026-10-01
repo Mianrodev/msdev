@@ -11,7 +11,7 @@
  *  2. New leads: open jobs whose title matches the owner's words are added
  *     (never duplicated; jobs already seen — even archived ones — are
  *     skipped), with the facts the board states and nothing else.
- *  3. More companies: remote-job sites (Remotive, Himalayas…) are read for
+ *  3. More companies: remote-job sites (Remotive, Himalayas, Workable…) are read for
  *     matching jobs at companies not watched yet. A job only counts once the
  *     same job is found on the company's OWN careers board — then that board
  *     is watched from now on and its jobs are added as in 2. Jobs that can't be
@@ -594,7 +594,8 @@ export async function runDiscovery(
   const byPosting = new Map<string, RecordRow[]>();
   // Same company + same job title = the same job, even if you saved it from LinkedIn or another site,
   // or the company posted it once per city.
-  const sameJob = (company: string, title: string) => `${normalizeText(company)}|${normalizeText(title)}`;
+  // "Acme (client undisclosed)" and "Acme" are one company: notes in brackets are ignored.
+  const sameJob = (company: string, title: string) => `${normalizeText(company.replace(/\([^)]*\)/g, " "))}|${normalizeText(title)}`;
   const knownJobs = new Set(all.map((r) => sameJob(r.account, r.opportunity)));
   const byUrl = new Map<string, RecordRow[]>();
   for (const r of all) {
@@ -704,8 +705,9 @@ export async function runDiscovery(
     const general = /^(anywhere|worldwide|global|international|apac|asia|emea|latam|remote)$/i;
     const country = settings.regionWords.find((w) => !general.test(w.trim()));
     const siteResults = await pool(siteKeys, 6, async (site) => {
-      // Himalayas is searched with your words and region, so its saved copy is kept per set of words.
-      const key = site === "himalayas" ? `site:himalayas:${country ?? ""}:${[...settings.titleWords].sort().join("|").toLowerCase()}` : `site:${site}`;
+      // Himalayas and Workable are searched with your words and region, so their saved copy is kept per set of words.
+      const searched = site === "himalayas" || site === "workable";
+      const key = searched ? `site:${site}:${country ?? ""}:${[...settings.titleWords].sort().join("|").toLowerCase()}` : `site:${site}`;
       const hit = await readCache<Listing[]>(ctx.db, key, maxAge);
       if (hit) return { site, res: { ok: true as const, listings: hit.value } };
       const res = await fetchSite(site, { searchWords: settings.titleWords, country, deadline: tSites + (opts.siteBudgetMs ?? 90_000) / 2 }, fetcher);
@@ -715,7 +717,7 @@ export async function runDiscovery(
     });
     const watchedNames = new Set(allBoards.map((b) => normalizeText(b.company)));
     const watchedKeys = new Set(allBoards.map((b) => b.key));
-    const byCompany = new Map<string, { company: string; hints: Set<string>; listings: Listing[] }>();
+    const byCompany = new Map<string, { company: string; hints: Set<string>; listings: Listing[]; workable: boolean }>();
     for (const { site, res } of siteResults) {
       if (!res.ok) {
         report.sitesFailed!.push({ site: SITES[site].name, error: res.error });
@@ -728,8 +730,9 @@ export async function runDiscovery(
         if (/^NO/.test(regionVerdict(l.location, settings.regionWords, settings.otherRegionWords, "remote"))) continue;
         const name = normalizeText(l.company);
         if (!name || watchedNames.has(name) || knownJobs.has(sameJob(l.company, l.title))) continue;
-        const e = byCompany.get(name) ?? { company: l.company, hints: new Set<string>(), listings: [] };
+        const e = byCompany.get(name) ?? { company: l.company, hints: new Set<string>(), listings: [], workable: false };
         if (l.companyHint) e.hints.add(l.companyHint);
+        if (l.site === "workable") e.workable = true;
         if (!e.listings.some((x) => sameTitle(x.title, l.title))) {
           e.listings.push(l);
           report.siteMatches!++;
@@ -770,16 +773,18 @@ export async function runDiscovery(
     type Try = { name: string; e: (typeof toTry)[number][1]; hit: { ref: BoardRef; res: { company: string | null; postings: Posting[] } } | null; tried: boolean; watched?: boolean };
     const tries = await pool(toTry, 6, async ([name, e]): Promise<Try> => {
       if (Date.now() > deadline) return { name, e, hit: null, tried: false };
-      for (const ref of [...knownBoard(name), ...candidateBoards(e.company, [...e.hints])]) {
+      let busy = false; // a board that said "slow down" isn't a board that doesn't exist: try again next time
+      for (const ref of [...knownBoard(name), ...candidateBoards(e.company, [...e.hints], { workable: e.workable })]) {
         // Already watched under another name: this search already reads it, nothing to confirm.
         if (watchedKeys.has(boardKey(ref))) return { name, e, hit: null, tried: true, watched: true };
         if (Date.now() > deadline) return { name, e, hit: null, tried: false };
         const res = await getBoard(ref);
+        if (!res.ok && /rate limited/.test(res.error)) busy = true;
         if (!res.ok || !res.postings.length) continue;
         // The board must really list one of the jobs — a board that merely shares the name doesn't count.
         if (e.listings.some((l) => res.postings.some((p) => sameTitle(p.title, l.title)))) return { name, e, hit: { ref, res }, tried: true };
       }
-      return { name, e, hit: null, tried: true };
+      return { name, e, hit: null, tried: !busy };
     });
 
     sitesMs = Date.now() - tSites;

@@ -1,6 +1,7 @@
 /**
  * Read-only access to the free public feeds of remote-job sites (Remotive,
- * Himalayas, Jobicy, RemoteOK, Working Nomads, We Work Remotely).
+ * Himalayas, Workable's job search, Jobicy, RemoteOK, Working Nomads, We Work
+ * Remotely). Workable is used by companies in every industry, not just tech.
  *
  * These sites are used to DISCOVER companies, never as proof a job is real:
  * a listing only counts once the same job is found on the company's own
@@ -9,11 +10,12 @@
  */
 import { defaultFetcher, plainText, type Fetcher } from "./job-boards";
 
-export type Site = "remotive" | "himalayas" | "jobicy" | "remoteok" | "workingnomads" | "weworkremotely";
+export type Site = "remotive" | "himalayas" | "workable" | "jobicy" | "remoteok" | "workingnomads" | "weworkremotely";
 
 export const SITES: Record<Site, { name: string; home: string }> = {
   remotive: { name: "Remotive", home: "https://remotive.com" },
   himalayas: { name: "Himalayas", home: "https://himalayas.app" },
+  workable: { name: "Workable job search", home: "https://jobs.workable.com" },
   jobicy: { name: "Jobicy", home: "https://jobicy.com" },
   remoteok: { name: "RemoteOK", home: "https://remoteok.com" },
   workingnomads: { name: "Working Nomads", home: "https://www.workingnomads.com" },
@@ -51,8 +53,8 @@ async function json(fetcher: Fetcher, url: string): Promise<unknown> {
 }
 
 /**
- * Read one site's current remote jobs. `searchWords` narrows sites that support searching (Himalayas);
- * `country` asks Himalayas for jobs open to that country. Failures are returned, never thrown.
+ * Read one site's current remote jobs. `searchWords` narrows sites that support searching (Himalayas,
+ * Workable); `country` asks them for jobs open to that country. Failures are returned, never thrown.
  */
 export async function fetchSite(
   site: Site,
@@ -111,11 +113,66 @@ export async function fetchSite(
         }
         return { ok: true, listings: out.filter(listing) };
       }
+      case "workable": {
+        // One page per word for jobs open to your country, plus the first 12 words worldwide.
+        // A job posted for several countries is one listing, with every place it names.
+        const found = new Map<string, Listing & { places: Set<string> }>();
+        const searches = [
+          ...searchWords.map((w) => ({ w, where: country })),
+          ...(country ? searchWords.slice(0, 12).map((w) => ({ w, where: undefined })) : []),
+        ];
+        for (const { w, where } of searches) {
+          if (Date.now() > deadline) break; // keep what's found so far
+          const q = new URLSearchParams({ query: w, workplace: "remote" });
+          if (where) q.set("location", where);
+          const res = await fetcher(`https://jobs.workable.com/api/v1/jobs?${q}`);
+          if (res.status === 429) break; // asked to slow down: keep what's found
+          if (res.status !== 200) continue;
+          const d = (await res.json()) as { jobs?: Record<string, unknown>[] };
+          for (const r of d.jobs ?? []) {
+            const co = (r.company ?? {}) as Record<string, unknown>;
+            const company = str(co.title);
+            const title = str(r.title);
+            const key = `${company}|${title}`.toLowerCase();
+            const places = (Array.isArray(r.locations) ? (r.locations as unknown[]).map(String) : []).filter((l) => l && l !== "TELECOMMUTE");
+            const had = found.get(key);
+            if (had) {
+              places.forEach((l) => had.places.add(l));
+              continue;
+            }
+            let hint: string | undefined;
+            try {
+              hint = new URL(str(co.website)).hostname.replace(/^www\./, "").split(".")[0] || undefined;
+            } catch {}
+            found.set(key, {
+              site,
+              company,
+              title,
+              location: null,
+              url: str(r.url),
+              postedAt: day(r.created),
+              summary: plainText(str(r.description), 1500),
+              companyHint: hint,
+              places: new Set(places),
+            });
+          }
+        }
+        const listings = [...found.values()].map(({ places, ...l }) => ({ ...l, location: places.size ? `Remote — ${[...places].join("; ")}` : "Remote" }));
+        return { ok: true, listings: listings.filter(listing) };
+      }
       case "jobicy": {
         const out: Listing[] = [];
-        for (const url of ["https://jobicy.com/api/v2/remote-jobs?count=100", "https://jobicy.com/api/v2/remote-jobs?count=100&geo=apac"]) {
+        const seen = new Set<string>();
+        for (const url of [
+          "https://jobicy.com/api/v2/remote-jobs?count=100",
+          "https://jobicy.com/api/v2/remote-jobs?count=100&geo=apac",
+          "https://jobicy.com/api/v2/remote-jobs?count=100&industry=management",
+          "https://jobicy.com/api/v2/remote-jobs?count=100&industry=business",
+        ]) {
           const d = (await json(fetcher, url)) as { jobs?: Record<string, unknown>[] };
-          for (const r of d.jobs ?? [])
+          for (const r of d.jobs ?? []) {
+            if (seen.has(str(r.url))) continue;
+            seen.add(str(r.url));
             out.push({
               site,
               company: str(r.companyName),
@@ -125,6 +182,7 @@ export async function fetchSite(
               postedAt: day(r.pubDate),
               summary: plainText(str(r.jobDescription) || str(r.jobExcerpt), 1500),
             });
+          }
         }
         return { ok: true, listings: out.filter(listing) };
       }
@@ -166,9 +224,22 @@ export async function fetchSite(
         };
       }
       case "weworkremotely": {
-        const res = await fetcher("https://weworkremotely.com/remote-jobs.rss");
-        if (res.status !== 200 || !res.text) return { ok: false, error: `site answered ${res.status}` };
-        const xml = await res.text();
+        // The main feed only has the newest jobs; the category feeds go further back.
+        let xml = "";
+        for (const feed of [
+          "remote-jobs",
+          "categories/remote-management-and-finance-jobs",
+          "categories/remote-product-jobs",
+          "categories/all-other-remote-jobs",
+          "categories/remote-sales-and-marketing-jobs",
+        ]) {
+          const res = await fetcher(`https://weworkremotely.com/${feed}.rss`);
+          if (res.status !== 200 || !res.text) {
+            if (feed === "remote-jobs") return { ok: false, error: `site answered ${res.status}` };
+            continue;
+          }
+          xml += await res.text();
+        }
         const tag = (item: string, name: string) => {
           const m = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(item);
           return m ? m[1].replace(/^<!\[CDATA\[|\]\]>$/g, "").trim() : "";
@@ -188,7 +259,8 @@ export async function fetchSite(
             summary: plainText(decode(tag(item, "description")), 1500),
           };
         });
-        return { ok: true, listings: listings.filter(listing) };
+        const seen = new Set<string>();
+        return { ok: true, listings: listings.filter((l) => listing(l) && !seen.has(l.url) && !!seen.add(l.url)) };
       }
     }
   } catch (e) {

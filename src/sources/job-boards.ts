@@ -126,7 +126,7 @@ export function boardLink(b: BoardRef): string {
  * Where a company's own careers board might be, from its name: the boards to try, most likely first.
  * Only ever used together with a check that the job is really listed there.
  */
-export function candidateBoards(company: string, hints: string[] = []): BoardRef[] {
+export function candidateBoards(company: string, hints: string[] = [], { workable = false } = {}): BoardRef[] {
   const words = company
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -140,6 +140,8 @@ export function candidateBoards(company: string, hints: string[] = []): BoardRef
   if (!words.length) return [];
   const slugs = [...new Set([...hints.map((h) => h.toLowerCase()).filter((h) => /^[a-z0-9-]{2,60}$/.test(h)), words.join(""), words.join("-")])].slice(0, 3);
   const out: BoardRef[] = [];
+  // A job found on Workable's search is on the company's Workable page, so look there first.
+  if (workable) for (const slug of slugs) out.push({ provider: "workable", slug });
   for (const provider of ["greenhouse", "lever", "ashby", "recruitee"] as const) for (const slug of slugs) out.push({ provider, slug });
   out.push({ provider: "smartrecruiters", slug: words.join("") });
   return out;

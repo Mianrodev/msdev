@@ -79,7 +79,7 @@ export default function HelpPage() {
           <p>
             From companies&apos; own careers pages (Lever, Greenhouse, Ashby, Workable, Recruitee, SmartRecruiters): the
             companies in your tracker, ones you add on <Link href="/discover">Find leads</Link>, and new companies spotted on
-            remote-job sites (Remotive, Himalayas, Jobicy, RemoteOK, Working Nomads, We Work Remotely). A job from a
+            remote-job sites (Remotive, Himalayas, Workable job search, Jobicy, RemoteOK, Working Nomads, We Work Remotely). A job from a
             remote-job site is only added once the same job is found on the company&apos;s own careers page — so every job
             the app adds was posted by the company itself. Each job says how it was confirmed under &quot;Is it
             genuine?&quot;. It costs nothing and uses no AI. LinkedIn and similar sites can&apos;t be searched automatically —

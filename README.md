@@ -98,8 +98,9 @@ loaded on every start.
      word, and drops jobs that fail your screen rules (on-site/hybrid, or only
      open to another region). New jobs land in **New to review**, where you
      press Yes / Not sure / No. Yes moves the job through to Ready.
-  3. Reads remote-job sites (Remotive, Himalayas, Jobicy, RemoteOK, Working
-     Nomads, We Work Remotely) for matching jobs at companies not watched yet,
+  3. Reads remote-job sites (Remotive, Himalayas, Workable's job search —
+     used by companies in every industry —, Jobicy, RemoteOK, Working Nomads,
+     We Work Remotely) for matching jobs at companies not watched yet,
      and looks for each company's own careers board (`candidateBoards`). Only
      if that board lists the same job is it trusted: the board is watched from
      then on and its jobs are added as above, linking to the company's page.
