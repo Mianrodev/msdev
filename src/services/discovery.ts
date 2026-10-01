@@ -205,13 +205,42 @@ export const DEFAULTS = {
 
 const REMOTE_WORDS = ["remote", "anywhere", "worldwide", "distributed", "work from home", "wfh"];
 
+/** Words in a title, location or description that mean the job is NOT fully remote. */
+const NOT_REMOTE =
+  /\b(hybrid|on-?site|in-?office|office[- ]based|in[- ]person|(\d|one|two|three|four)\s*(days?|x)\s*(a|per|\/|each)\s*week\s*(in|at|from)\s+(\S+\s+){0,3}?office)\b/i;
+/** Description phrases that say the job itself is remote (not just "a remote-first company" with offices). */
+const SAYS_REMOTE =
+  /\b(fully[- ]remote|100\s*%\s*remote|remote[- ](role|position|job|opportunity|friendly)|this (role|position|job) is (fully )?remote|work(ing)? remotely|remote (from|within|in|across) (india|apac|asia|anywhere)|work from (home|anywhere)|telecommut\w*|home[- ]based|location:\s*remote)\b/i;
+
+/**
+ * Is this job really remote? Only clear evidence counts: the job board marks it remote, or the title,
+ * location or description says so. A job that names an office city and doesn't say remote — or says
+ * hybrid or on-site anywhere — is not remote. Answers start with YES or NO.
+ */
+export function remoteVerdict(p: { title: string; location: string | null; workplace?: string | null; summary?: string | null }): string {
+  if (p.workplace === "onsite") return "NO — the job board marks it on-site";
+  if (p.workplace === "hybrid") return "NO — the job board marks it hybrid";
+  const head = `${p.title}\n${p.location ?? ""}`;
+  if (NOT_REMOTE.test(head)) return "NO — the listing says hybrid or office";
+  if (p.workplace === "remote") return "YES — the job board marks it remote";
+  if (REMOTE_WORDS.some((w) => containsTerm(head, w)) || /telecommute|home[- ]based/i.test(head)) return "YES — the listing says remote";
+  const text = p.summary ?? "";
+  if (SAYS_REMOTE.test(text)) {
+    // "Remote-friendly, 3 days a week in our Bengaluru office" is not remote.
+    if (/\b(hybrid|(\d|one|two|three|four)\s*(days?|x)\s*(a|per|\/|each)\s*week\s*(in|at|from)\s+(\S+\s+){0,3}?office|must be (based|located) (in|near) )/i.test(text))
+      return "NO — the description mentions hybrid or office days";
+    return "YES — the description says it's remote";
+  }
+  return "NO — the listing doesn't say it's remote";
+}
+
 /** Rules the weekly check applies to found jobs (they only use details the job board provides). */
 export const DISCOVERY_RULES: RuleInput[] = [
   {
     key: "discovery.remote_only",
     label: "Remote roles only",
     description:
-      "From your spreadsheet's rules: the search is remote-only. Jobs the board marks as on-site or hybrid are archived; jobs that don't say are kept for you to review.",
+      "From your spreadsheet's rules: the search is remote-only. Jobs the board marks as on-site or hybrid are archived. The search also skips jobs that don't clearly say they're remote (an office city alone isn't enough).",
     appliesFrom: "screen",
     field: "workplaceType",
     operator: "excludes_all",
@@ -504,7 +533,7 @@ const sameTitle = (a: string, b: string) => {
 
 /** A company looked for recently without finding its board isn't retried for this many days. */
 const RETRY_DAYS = 30;
-const MAX_COMPANIES_PER_SEARCH = 120;
+const MAX_COMPANIES_PER_SEARCH = 200;
 
 export async function runDiscovery(
   ctx: Ctx,
@@ -670,6 +699,12 @@ export async function runDiscovery(
       }
       // Boards whose list leaves descriptions out: fetch this one job's description (one small request).
       const job = p.summary ? p : { ...p, summary: await fetchPostingSummary(ref, p.id, fetcher) };
+      // Remote only: a job needs clear evidence that it's remote (an office city alone isn't enough).
+      attributes.remoteCheck = remoteVerdict(job);
+      if (/^NO/.test(String(attributes.remoteCheck))) {
+        report.filteredOut++;
+        continue;
+      }
       // Even on a careers page, a listing showing scam signs is never added.
       if (warningSigns(`${job.title}\n${job.summary ?? ""}`).length) {
         report.warningSkipped!++;
@@ -707,8 +742,8 @@ export async function runDiscovery(
     const siteResults = await pool(siteKeys, 6, async (site) => {
       // Himalayas and Workable are searched with your words and region, so their saved copy is kept per set of words.
       const searched = site === "himalayas" || site === "workable";
-      // "v2": searched five pages deep (copies from the shallower search aren't reused).
-      const key = searched ? `site:${site}:v2:${country ?? ""}:${[...settings.titleWords].sort().join("|").toLowerCase()}` : `site:${site}`;
+      // "v3": the deeper search (copies from a shallower one aren't reused).
+      const key = searched ? `site:${site}:v3:${country ?? ""}:${[...settings.titleWords].sort().join("|").toLowerCase()}` : `site:${site}`;
       const hit = await readCache<Listing[]>(ctx.db, key, maxAge);
       if (hit) return { site, res: { ok: true as const, listings: hit.value } };
       const res = await fetchSite(site, { searchWords: settings.titleWords, country, deadline: tSites + ((opts.siteBudgetMs ?? 90_000) * 3) / 4 }, fetcher);

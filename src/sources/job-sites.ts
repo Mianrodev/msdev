@@ -127,7 +127,7 @@ export async function fetchSite(
         return { ok: true, listings: out.filter(listing) };
       }
       case "workable": {
-        // Remote jobs open to your country for every word (up to 5 pages each, a page at a time as above),
+        // Remote jobs open to your country for every word (up to 10 pages each, a page at a time as above),
         // plus the first page worldwide for the first 12 words. A job posted for several countries is one
         // listing, with every place it names.
         const found = new Map<string, Listing & { places: Set<string> }>();
@@ -137,7 +137,7 @@ export async function fetchSite(
           ...(country ? searchWords.slice(0, 12).map((w) => ({ w, where: undefined, token: "" })) : []),
         ];
         let busy = false;
-        for (let page = 0; page < 5 && open.length && !busy; page++) {
+        for (let page = 0; page < 10 && open.length && !busy; page++) {
           const more: Search[] = [];
           for (const search of open) {
             if (Date.now() > deadline) break; // keep what's found so far

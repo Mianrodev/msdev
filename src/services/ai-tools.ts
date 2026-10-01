@@ -3,15 +3,16 @@
  *
  * Read: an explanation of the app, the owner's leads, one lead in full, the
  * last search (including jobs that couldn't be confirmed), saved answers.
- * Write: prepared brief/answers and notes on a lead, and new leads it found.
- * Never: decide Yes/No, say you applied, change rules or settings, contact
+ * Write: prepared brief/answers and notes on a lead, new leads it found, and
+ * sorting jobs still waiting in New to review (Ready / On hold / Archived), as
+ * the owner asked. Never: say you applied, change rules or settings, contact
  * anyone. Everything it does is recorded in Activity as "Your AI".
  */
 import { applied, describeSearch, LIST_TO_VIEW, LISTS, listOf, OUTREACH_NAMES, TIER_NAMES, whereItIs, type ListKey } from "@/components/plain";
 import type { RecordRow } from "@/db/schema";
 import { getAnswers, getProfile } from "./answers";
 import { asSystem, type Ctx } from "./context";
-import { getDiscoverySettings, lastDiscovery } from "./discovery";
+import { getDiscoverySettings, lastDiscovery, reviewFoundJob } from "./discovery";
 import { listHistory } from "./history";
 import { dedupKey, normalizeText } from "@/core/dedup";
 import { countsByView, evaluateRecord, findByDedupKey, getRecord, listRecords, updateRecord, upsertLead } from "./records";
@@ -255,6 +256,34 @@ export const AI_TOOLS: AiTool[] = [
       const line = `[${new Date().toISOString().slice(0, 10)} · your AI] ${note}`;
       await updateRecord(ctx, r.id, { notes: r.notes ? `${r.notes}\n\n${line}` : line }, "Note added by your AI");
       return `Note added to "${r.account} — ${r.opportunity}".`;
+    },
+  },
+  {
+    name: "sort_lead",
+    title: "Sort a job waiting for review",
+    description:
+      "Sort one job from New to review after judging it against the owner's profile: \"ready\" (worth applying — moves to Ready), \"hold\" (not sure — On hold), or \"archive\" (not a fit). Give a one-line reason; it's saved as a note. Only works on jobs still in New to review. Applying, and marking a job Applied, stay with the owner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        choice: { type: "string", enum: ["ready", "hold", "archive"] },
+        reason: { type: "string", description: "One line: why (fit, remote, pay)." },
+      },
+      required: ["id", "choice", "reason"],
+    },
+    readOnly: false,
+    run: async (ctx, a) => {
+      const choice = ({ ready: "yes", hold: "hold", archive: "no" } as const)[s(a.choice) as "ready" | "hold" | "archive"];
+      if (!choice) throw new Error('choice must be "ready", "hold" or "archive".');
+      const reason = s(a.reason);
+      if (!reason) throw new Error("Give a one-line reason.");
+      const r = await getRecord(ctx, s(a.id));
+      if (listOf(r) !== "review") throw new Error(`"${r.account} — ${r.opportunity}" isn't waiting for review (it's in ${whereItIs(r)}).`);
+      const line = `[${new Date().toISOString().slice(0, 10)} · your AI] Sorted to ${a.choice}: ${reason}`;
+      await updateRecord(ctx, r.id, { notes: r.notes ? `${r.notes}\n\n${line}` : line }, "Note added by your AI");
+      const done = await reviewFoundJob(ctx, r.id, choice);
+      return `"${r.account} — ${r.opportunity}" is now in ${whereItIs(done)}.`;
     },
   },
   {

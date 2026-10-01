@@ -3,7 +3,7 @@ import { candidateBoards, detectBoard } from "@/sources/job-boards";
 import { fetchSite, warningSigns } from "@/sources/job-sites";
 import { listRecords, getRecord, upsertLead, holdRecord } from "@/services/records";
 import { createRule } from "@/services/rules";
-import { addBoard, listBoards, regionVerdict, reviewFoundJob, runDiscovery, seedDiscoveryRules, titleMatches, DEFAULTS } from "@/services/discovery";
+import { addBoard, listBoards, regionVerdict, remoteVerdict, reviewFoundJob, runDiscovery, seedDiscoveryRules, titleMatches, DEFAULTS } from "@/services/discovery";
 import { runUpdate } from "@/services/run-update";
 import { listHistory } from "@/services/history";
 import { testCtx } from "./helpers";
@@ -344,5 +344,21 @@ describe("Himalayas slowing down", () => {
     const res = await fetchSite("himalayas", { searchWords: ["a", "b", "c", "d"] }, fetcher);
     expect(res.ok && res.listings.length).toBe(2);
     expect(n).toBe(3);
+  });
+});
+
+describe("Remote only", () => {
+  const v = (title: string, location: string | null, workplace: string | null = null, summary: string | null = null) =>
+    remoteVerdict({ title, location, workplace, summary }).slice(0, 3);
+  it("needs clear evidence that the job is remote", () => {
+    expect(v("Implementation Manager", "Bengaluru, Karnataka, India")).toBe("NO ");
+    expect(v("Implementation Manager", "Remote - India")).toBe("YES");
+    expect(v("Implementation Manager", "India", "remote")).toBe("YES");
+    expect(v("Implementation Manager", "India", null, "This is a fully remote role open to candidates in India.")).toBe("YES");
+    expect(v("Implementation Manager", "Pune", null, "Remote-friendly team; 3 days a week in our Pune office.")).toBe("NO ");
+    expect(v("Operations Manager (on-site)", "India")).toBe("NO ");
+    expect(v("Program Manager", "Hybrid - Mumbai")).toBe("NO ");
+    expect(v("Program Manager", "Remote", "hybrid")).toBe("NO ");
+    expect(v("Program Manager", "Anywhere (contract)")).toBe("YES");
   });
 });

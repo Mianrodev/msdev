@@ -151,7 +151,7 @@ function isUuid(s: string | undefined): s is string {
   return !!s && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 
-const plain = (html: string | null | undefined, max = 1500): string | null => {
+const plain = (html: string | null | undefined, max = 4000): string | null => {
   if (!html) return null;
   const t = html
     .replace(/<(br|\/p|\/li|\/h\d)[^>]*>/gi, "\n")
