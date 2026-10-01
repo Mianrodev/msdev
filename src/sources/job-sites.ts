@@ -81,16 +81,28 @@ export async function fetchSite(
         };
       }
       case "himalayas": {
+        // Every word, a page at a time: all words get their first page before any word gets its second,
+        // so running out of time loses the deepest pages, never whole words. Up to 5 pages (100 jobs) a word.
         const out: Listing[] = [];
         const seen = new Set<string>();
-        // Every word is searched (so new kinds of work are found in any industry); the first 12 get
-        // three pages each, the rest one page, to keep the download small.
-        for (const [i, word] of searchWords.entries()) {
-          for (let offset = 0; offset < (i < 12 ? 60 : 20); offset += 20) {
+        let open = [...searchWords];
+        let busy = false;
+        for (let offset = 0; offset < 100 && open.length && !busy; offset += 20) {
+          const more: string[] = [];
+          for (const word of open) {
             if (Date.now() > deadline) break; // keep what's found so far
             const q = new URLSearchParams({ q: word, offset: String(offset) });
             if (country) q.set("country", country);
-            const d = (await json(fetcher, `https://himalayas.app/jobs/api/search?${q}`)) as { jobs?: Record<string, unknown>[] };
+            const res = await fetcher(`https://himalayas.app/jobs/api/search?${q}`);
+            if (res.status === 429) {
+              busy = true; // asked to slow down: keep what's found
+              break;
+            }
+            if (res.status !== 200) {
+              if (!out.length) throw new Error(`site answered ${res.status}`);
+              continue;
+            }
+            const d = (await res.json()) as { jobs?: Record<string, unknown>[] };
             const jobs = d.jobs ?? [];
             for (const r of jobs) {
               const url = str(r.applicationLink) || str(r.guid);
@@ -108,54 +120,68 @@ export async function fetchSite(
                 companyHint: str(r.companySlug) || undefined,
               });
             }
-            if (jobs.length < 20) break;
+            if (jobs.length === 20) more.push(word);
           }
+          open = more;
         }
         return { ok: true, listings: out.filter(listing) };
       }
       case "workable": {
-        // One page per word for jobs open to your country, plus the first 12 words worldwide.
-        // A job posted for several countries is one listing, with every place it names.
+        // Remote jobs open to your country for every word (up to 5 pages each, a page at a time as above),
+        // plus the first page worldwide for the first 12 words. A job posted for several countries is one
+        // listing, with every place it names.
         const found = new Map<string, Listing & { places: Set<string> }>();
-        const searches = [
+        type Search = { w: string; where?: string; token?: string };
+        let open: Search[] = [
           ...searchWords.map((w) => ({ w, where: country })),
-          ...(country ? searchWords.slice(0, 12).map((w) => ({ w, where: undefined })) : []),
+          ...(country ? searchWords.slice(0, 12).map((w) => ({ w, where: undefined, token: "" })) : []),
         ];
-        for (const { w, where } of searches) {
-          if (Date.now() > deadline) break; // keep what's found so far
-          const q = new URLSearchParams({ query: w, workplace: "remote" });
-          if (where) q.set("location", where);
-          const res = await fetcher(`https://jobs.workable.com/api/v1/jobs?${q}`);
-          if (res.status === 429) break; // asked to slow down: keep what's found
-          if (res.status !== 200) continue;
-          const d = (await res.json()) as { jobs?: Record<string, unknown>[] };
-          for (const r of d.jobs ?? []) {
-            const co = (r.company ?? {}) as Record<string, unknown>;
-            const company = str(co.title);
-            const title = str(r.title);
-            const key = `${company}|${title}`.toLowerCase();
-            const places = (Array.isArray(r.locations) ? (r.locations as unknown[]).map(String) : []).filter((l) => l && l !== "TELECOMMUTE");
-            const had = found.get(key);
-            if (had) {
-              places.forEach((l) => had.places.add(l));
-              continue;
+        let busy = false;
+        for (let page = 0; page < 5 && open.length && !busy; page++) {
+          const more: Search[] = [];
+          for (const search of open) {
+            if (Date.now() > deadline) break; // keep what's found so far
+            const q = new URLSearchParams({ query: search.w, workplace: "remote" });
+            if (search.where) q.set("location", search.where);
+            if (search.token) q.set("pageToken", search.token);
+            const res = await fetcher(`https://jobs.workable.com/api/v1/jobs?${q}`);
+            if (res.status === 429) {
+              busy = true; // asked to slow down: keep what's found
+              break;
             }
-            let hint: string | undefined;
-            try {
-              hint = new URL(str(co.website)).hostname.replace(/^www\./, "").split(".")[0] || undefined;
-            } catch {}
-            found.set(key, {
-              site,
-              company,
-              title,
-              location: null,
-              url: str(r.url),
-              postedAt: day(r.created),
-              summary: plainText(str(r.description), 1500),
-              companyHint: hint,
-              places: new Set(places),
-            });
+            if (res.status !== 200) continue;
+            const d = (await res.json()) as { jobs?: Record<string, unknown>[]; nextPageToken?: string };
+            for (const r of d.jobs ?? []) {
+              const co = (r.company ?? {}) as Record<string, unknown>;
+              const company = str(co.title);
+              const title = str(r.title);
+              const key = `${company}|${title}`.toLowerCase();
+              const places = (Array.isArray(r.locations) ? (r.locations as unknown[]).map(String) : []).filter((l) => l && l !== "TELECOMMUTE");
+              const had = found.get(key);
+              if (had) {
+                places.forEach((l) => had.places.add(l));
+                continue;
+              }
+              let hint: string | undefined;
+              try {
+                hint = new URL(str(co.website)).hostname.replace(/^www\./, "").split(".")[0] || undefined;
+              } catch {}
+              found.set(key, {
+                site,
+                company,
+                title,
+                location: null,
+                url: str(r.url),
+                postedAt: day(r.created),
+                summary: plainText(str(r.description), 1500),
+                companyHint: hint,
+                places: new Set(places),
+              });
+            }
+            // Worldwide searches ("" token) stay at one page.
+            if (d.nextPageToken && search.token !== "" && (d.jobs ?? []).length) more.push({ ...search, token: d.nextPageToken });
           }
+          open = more;
         }
         const listings = [...found.values()].map(({ places, ...l }) => ({ ...l, location: places.size ? `Remote — ${[...places].join("; ")}` : "Remote" }));
         return { ok: true, listings: listings.filter(listing) };

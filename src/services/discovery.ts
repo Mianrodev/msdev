@@ -707,10 +707,11 @@ export async function runDiscovery(
     const siteResults = await pool(siteKeys, 6, async (site) => {
       // Himalayas and Workable are searched with your words and region, so their saved copy is kept per set of words.
       const searched = site === "himalayas" || site === "workable";
-      const key = searched ? `site:${site}:${country ?? ""}:${[...settings.titleWords].sort().join("|").toLowerCase()}` : `site:${site}`;
+      // "v2": searched five pages deep (copies from the shallower search aren't reused).
+      const key = searched ? `site:${site}:v2:${country ?? ""}:${[...settings.titleWords].sort().join("|").toLowerCase()}` : `site:${site}`;
       const hit = await readCache<Listing[]>(ctx.db, key, maxAge);
       if (hit) return { site, res: { ok: true as const, listings: hit.value } };
-      const res = await fetchSite(site, { searchWords: settings.titleWords, country, deadline: tSites + (opts.siteBudgetMs ?? 90_000) / 2 }, fetcher);
+      const res = await fetchSite(site, { searchWords: settings.titleWords, country, deadline: tSites + ((opts.siteBudgetMs ?? 90_000) * 3) / 4 }, fetcher);
       // Keep only listings someone could want (their titles match anyone's words).
       if (res.ok) await writeCache(ctx.db, key, res.listings.filter((l) => worthDescribing(l.title)));
       return { site, res };

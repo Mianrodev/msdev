@@ -280,7 +280,7 @@ describe("finding leads", () => {
 });
 
 describe("Himalayas search", () => {
-  it("searches every word: three pages for the first 12, one page for the rest", async () => {
+  it("searches every word, a page at a time, up to five pages each", async () => {
     const asked: string[] = [];
     const fetcher = async (url: string) => {
       asked.push(url);
@@ -294,7 +294,9 @@ describe("Himalayas search", () => {
     };
     const words = Array.from({ length: 15 }, (_, i) => `word${i}`);
     const res = await fetchSite("himalayas", { searchWords: words }, fetcher);
-    expect(asked).toHaveLength(12 * 3 + 3);
+    expect(asked).toHaveLength(15 * 5);
+    // every word's first page comes before any second page
+    expect(asked.slice(0, 15).every((u) => u.includes("offset=0"))).toBe(true);
     expect(res.ok && res.listings.some((l) => l.title.startsWith("word14 "))).toBe(true);
   });
 });
@@ -327,5 +329,20 @@ describe("Workable job search", () => {
   it("looks on the company's Workable page first for jobs found there", () => {
     expect(candidateBoards("Harbour Freight Lines", ["harbourfreight"], { workable: true })[0]).toEqual({ provider: "workable", slug: "harbourfreight" });
     expect(candidateBoards("Harbour Freight Lines").some((b) => b.provider === "workable")).toBe(false);
+  });
+});
+
+describe("Himalayas slowing down", () => {
+  it("keeps what it found when asked to slow down", async () => {
+    let n = 0;
+    const fetcher = async (url: string) => {
+      n++;
+      if (n > 2) return { status: 429, json: async () => ({}) };
+      const q = new URL(url).searchParams.get("q");
+      return { status: 200, json: async () => ({ jobs: [{ companyName: "Acme", title: `${q} lead`, applicationLink: `https://acme.example/${q}` }] }) };
+    };
+    const res = await fetchSite("himalayas", { searchWords: ["a", "b", "c", "d"] }, fetcher);
+    expect(res.ok && res.listings.length).toBe(2);
+    expect(n).toBe(3);
   });
 });
