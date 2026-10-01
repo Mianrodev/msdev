@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { candidateBoards, detectBoard } from "@/sources/job-boards";
-import { warningSigns } from "@/sources/job-sites";
+import { fetchSite, warningSigns } from "@/sources/job-sites";
 import { listRecords, getRecord, upsertLead, holdRecord } from "@/services/records";
 import { createRule } from "@/services/rules";
 import { addBoard, listBoards, regionVerdict, reviewFoundJob, runDiscovery, seedDiscoveryRules, titleMatches, DEFAULTS } from "@/services/discovery";
@@ -276,5 +276,25 @@ describe("finding leads", () => {
     const postings = (rows.rows ?? (rows as unknown as { value: { postings: { title: string; summary: string | null }[] } }[]))[0].value.postings;
     expect(postings.find((p) => p.title === "Account Executive")?.summary).toBeNull();
     expect(postings.find((p) => p.title === "Implementation Specialist")?.summary).toMatch(/Implementation Specialist/);
+  });
+});
+
+describe("Himalayas search", () => {
+  it("searches every word: three pages for the first 12, one page for the rest", async () => {
+    const asked: string[] = [];
+    const fetcher = async (url: string) => {
+      asked.push(url);
+      const q = new URL(url).searchParams;
+      const jobs = Array.from({ length: 20 }, (_, i) => ({
+        companyName: "Acme",
+        title: `${q.get("q")} ${q.get("offset")} ${i}`,
+        applicationLink: `https://acme.example/${q.get("q")}/${q.get("offset")}/${i}`,
+      }));
+      return { status: 200, json: async () => ({ jobs }) };
+    };
+    const words = Array.from({ length: 15 }, (_, i) => `word${i}`);
+    const res = await fetchSite("himalayas", { searchWords: words }, fetcher);
+    expect(asked).toHaveLength(12 * 3 + 3);
+    expect(res.ok && res.listings.some((l) => l.title.startsWith("word14 "))).toBe(true);
   });
 });

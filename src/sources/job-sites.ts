@@ -81,8 +81,10 @@ export async function fetchSite(
       case "himalayas": {
         const out: Listing[] = [];
         const seen = new Set<string>();
-        for (const word of searchWords.slice(0, 12)) {
-          for (let offset = 0; offset < 60; offset += 20) {
+        // Every word is searched (so new kinds of work are found in any industry); the first 12 get
+        // three pages each, the rest one page, to keep the download small.
+        for (const [i, word] of searchWords.entries()) {
+          for (let offset = 0; offset < (i < 12 ? 60 : 20); offset += 20) {
             if (Date.now() > deadline) break; // keep what's found so far
             const q = new URLSearchParams({ q: word, offset: String(offset) });
             if (country) q.set("country", country);
