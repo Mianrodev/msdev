@@ -272,7 +272,7 @@ describe("finding leads", () => {
     const ctx = await testCtx();
     await addBoard(ctx, "https://jobs.lever.co/acme");
     await runDiscovery(ctx, { fetcher: fetcher(), sites: false });
-    const rows = (await ctx.db.execute("select value from source_cache where key like 'board:%'")) as unknown as { rows?: { value: { postings: { title: string; summary: string | null }[] } }[] };
+    const rows = (await ctx.db.execute("select value from source_cache where key like 'board2:%'")) as unknown as { rows?: { value: { postings: { title: string; summary: string | null }[] } }[] };
     const postings = (rows.rows ?? (rows as unknown as { value: { postings: { title: string; summary: string | null }[] } }[]))[0].value.postings;
     expect(postings.find((p) => p.title === "Account Executive")?.summary).toBeNull();
     expect(postings.find((p) => p.title === "Implementation Specialist")?.summary).toMatch(/Implementation Specialist/);
@@ -406,5 +406,53 @@ describe("careers system addresses", () => {
     expect(careersSystem("https://169.254.169.254/latest", "Metadata")).toBeNull();
     expect(careersSystem("https://metadata.google.internal/x", "Metadata")).toBeNull();
     expect(careersSystem("https://acme.bamboohr.com:8443/x", "Acme")).toBeNull();
+  });
+});
+
+describe("Who can apply (read from the whole posting)", () => {
+  it("catches limits to another country, wherever they sit in the posting", async () => {
+    const { workRestriction } = await import("@/sources/restrictions");
+    const { whoCanApply } = await import("@/services/discovery");
+    const s = { regionWords: ["India", "Anywhere", "Worldwide", "APAC"] };
+    const longIntro = "We build great software. ".repeat(400); // the limit comes after 10,000 characters
+    for (const text of [
+      `${longIntro} Remote: Work from Anywhere. Insurance mostly covered. *Available only to FT US-based employees`,
+      `${longIntro} Please note, this role is only open to candidates who live in the US.`,
+      `${longIntro} You must be based in the United Kingdom.`,
+      `${longIntro} This role requires candidates to be legally authorized to work in the United States without sponsorship.`,
+      `${longIntro} Job Type: Full-time, W-2.`,
+      `${longIntro} We cannot hire candidates outside of Canada at this time.`,
+    ])
+      expect(workRestriction(text), text.slice(-80)).not.toBeNull();
+    for (const text of [
+      "Fully remote. Open to candidates anywhere, including India.",
+      "Pay range for US-based candidates: $120k–$150k. Candidates elsewhere are paid in local currency.",
+      "We are an equal opportunity employer and consider protected veteran status. Facilitar la comunicación.",
+      "Comfortable working with US time zones.",
+    ])
+      expect(workRestriction(text), text).toBeNull();
+    // A US work-permit question on a job that names India is a company-wide form question; a plain limit still counts.
+    expect(whoCanApply({ location: "Remote - India", summary: "Are you legally authorized to work in the United States?" }, s)).toBeNull();
+    expect(whoCanApply({ location: "Remote", summary: "Are you legally authorized to work in the United States?" }, s)).not.toBeNull();
+    expect(whoCanApply({ location: "Remote - India", summary: "This role is only open to candidates who live in the US." }, s)).not.toBeNull();
+  });
+
+  it("keeps out a board job whose full description or application form limits it to the US", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    await addBoard(ctx, "https://job-boards.greenhouse.io/acme");
+    const ok = (body: unknown) => ({ status: 200, json: async () => body });
+    const fetcher = async (url: string) => {
+      if (url.endsWith("/v1/boards/acme/jobs"))
+        return ok({ jobs: [1, 2].map((id) => ({ id, title: `Implementation Lead ${id}`, absolute_url: `https://job-boards.greenhouse.io/acme/jobs/${id}`, location: { name: "Remote" } })) });
+      if (url.includes("/jobs/1?questions=true")) return ok({ content: "Fully remote role.", questions: [{ label: "Are you legally authorized to work in the United States?" }] });
+      if (url.includes("/jobs/2?questions=true")) return ok({ content: "Fully remote role, open worldwide.", questions: [{ label: "LinkedIn profile" }] });
+      return { status: 404, json: async () => ({}) };
+    };
+    const rep = await runDiscovery(ctx, { fetcher, today: "2026-10-02", sites: false });
+    const found = (await listRecords(ctx)).filter((r) => r.origin === "discovery");
+    expect(found.map((r) => r.opportunity)).toEqual(["Implementation Lead 2"]);
+    expect(found[0].attributes.whoCanApply).toMatch(/^YES/);
+    expect(rep.filteredOut).toBe(1);
   });
 });

@@ -7,6 +7,7 @@
  * eslint.config.mjs). It only ever GETs public job listings from the hosts
  * below; it never submits, posts or contacts anything.
  */
+import { workRestriction } from "./restrictions";
 
 export type Provider = "lever" | "greenhouse" | "ashby" | "workable" | "recruitee" | "smartrecruiters";
 
@@ -39,6 +40,9 @@ export interface Posting {
   postedAt: string | null;
   /** Plain-text start of the description, for review without opening the listing. */
   summary: string | null;
+  /** A "who can apply" limit found in the FULL description (e.g. "only open to candidates in the US").
+   *  null = read, none found; missing = not read yet (boards whose list has no descriptions). */
+  onlyFor?: string | null;
 }
 
 export type BoardResult = { ok: true; company: string | null; postings: Posting[] } | { ok: false; error: string };
@@ -151,6 +155,9 @@ function isUuid(s: string | undefined): s is string {
   return !!s && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 
+/** Enough for any whole job description (only used to look for "who can apply" limits, never stored). */
+const FULL = 200_000;
+
 const plain = (html: string | null | undefined, max = 4000): string | null => {
   if (!html) return null;
   const t = html
@@ -211,24 +218,32 @@ export function countingFetcher(inner?: Fetcher): { fetcher: Fetcher; bytes: () 
  * The start of one job's description, for boards whose list leaves it out (Greenhouse, SmartRecruiters).
  * One small request per job — used only for jobs actually being added.
  */
-export async function fetchPostingSummary(board: BoardRef, postingId: string, fetcher: Fetcher = defaultFetcher): Promise<string | null> {
+/** One job's description, for boards whose list leaves it out, plus any "who can apply" limit in it
+ *  (for Greenhouse, the application form's questions too, e.g. "Are you legally authorized to work in the US?"). */
+export async function fetchPostingSummary(
+  board: BoardRef,
+  postingId: string,
+  fetcher: Fetcher = defaultFetcher,
+): Promise<{ summary: string | null; onlyFor: string | null } | null> {
   const slug = encodeURIComponent(board.slug);
   const id = encodeURIComponent(postingId);
   try {
     if (board.provider === "greenhouse") {
       const base = board.region === "eu" ? "https://boards-api.eu.greenhouse.io" : "https://boards-api.greenhouse.io";
-      const res = await fetcher(`${base}/v1/boards/${slug}/jobs/${id}`);
+      const res = await fetcher(`${base}/v1/boards/${slug}/jobs/${id}?questions=true`);
       if (res.status !== 200) return null;
-      const r = (await res.json()) as { content?: string };
+      const r = (await res.json()) as { content?: string; questions?: { label?: string }[] };
       const html = typeof r.content === "string" ? r.content.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&") : null;
-      return plain(html);
+      const questions = (r.questions ?? []).map((q) => q.label ?? "").join(". ");
+      return { summary: plain(html), onlyFor: workRestriction(`${plain(html, FULL) ?? ""}\n${questions}`) };
     }
     if (board.provider === "smartrecruiters") {
       const res = await fetcher(`https://api.smartrecruiters.com/v1/companies/${slug}/postings/${id}`);
       if (res.status !== 200) return null;
       const r = (await res.json()) as { jobAd?: { sections?: Record<string, { text?: string }> } };
       const sec = r.jobAd?.sections ?? {};
-      return plain([sec.companyDescription?.text, sec.jobDescription?.text, sec.qualifications?.text].filter(Boolean).join("<p>"));
+      const html = [sec.companyDescription?.text, sec.jobDescription?.text, sec.qualifications?.text, sec.additionalInformation?.text].filter(Boolean).join("<p>");
+      return { summary: plain(html), onlyFor: workRestriction(plain(html, FULL)) };
     }
   } catch {
     // no description is fine — the listing link still works
@@ -266,6 +281,14 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
               compensation: sal?.min ? `${sal.currency ?? ""} ${sal.min}–${sal.max ?? ""} ${sal.interval ?? ""}`.trim() : null,
               postedAt: iso(r.createdAt),
               summary: plain((r.descriptionPlain as string) ?? (r.description as string)),
+              onlyFor: workRestriction(
+                plain(
+                  [r.description, ...(Array.isArray(r.lists) ? (r.lists as { text?: string; content?: string }[]).flatMap((l) => [l.text, l.content]) : []), r.additional]
+                    .filter((x): x is string => typeof x === "string")
+                    .join("<p>"),
+                  FULL,
+                ),
+              ),
             };
           }),
         };
@@ -295,6 +318,7 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
               compensation: null,
               postedAt: iso(r.first_published ?? r.updated_at),
               summary: plain(content),
+              ...(content ? { onlyFor: workRestriction(plain(content, FULL)) } : {}),
             };
           }),
         };
@@ -322,6 +346,7 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
                 compensation: comp,
                 postedAt: iso(r.publishedAt),
                 summary: plain((r.descriptionPlain as string) ?? (r.descriptionHtml as string)),
+                onlyFor: workRestriction(plain((r.descriptionHtml as string) ?? (r.descriptionPlain as string), FULL)),
               };
             }),
         };
@@ -346,6 +371,7 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
               compensation: null,
               postedAt: iso(typeof r.published_at === "string" ? r.published_at.replace(" UTC", "Z").replace(" ", "T") : null),
               summary: plain(r.description as string),
+              onlyFor: workRestriction(plain([r.description, r.requirements].filter((x) => typeof x === "string").join("<p>"), FULL)),
             })),
         };
       }
@@ -397,6 +423,7 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
               compensation: null,
               postedAt: iso(r.published_on ?? r.created_at),
               summary: plain(r.description as string),
+              onlyFor: workRestriction(plain([r.description, r.requirements, r.benefits].filter((x) => typeof x === "string").join("<p>"), FULL)),
             };
           }),
         };

@@ -40,6 +40,7 @@ import {
   type Posting,
 } from "@/sources/job-boards";
 import { careersSystem, fetchSite, postingPageTitle, SITES, warningSigns, type Listing, type Site } from "@/sources/job-sites";
+import { formQuestionOnly, workRestriction } from "@/sources/restrictions";
 import { asSystem, type Ctx } from "./context";
 import { BOARD_FRESH_MS, readCache, readCacheMany, writeCache } from "./source-cache";
 import { logHistory } from "./history";
@@ -211,6 +212,15 @@ const NOT_REMOTE =
 /** Description phrases that say the job is remote (office days or hybrid elsewhere in it still win). */
 const SAYS_REMOTE =
   /\b(fully[- ]remote|all[- ]remote|remote[- ]first|100\s*%\s*remote|remote[- ](role|position|job|opportunity|friendly)|this (role|position|job) is (fully )?remote|work(ing)? remotely|remote (from|within|in|across) (india|apac|asia|anywhere)|work from (home|anywhere)|telecommut\w*|home[- ]based|location:\s*remote)\b/i;
+
+/** A "who can apply" limit in the job's full text, or null. Form questions some companies ask on every
+ *  job ("authorized to work in the US?") don't count when the job itself names your country. */
+export function whoCanApply(p: { location: string | null; summary?: string | null; onlyFor?: string | null }, s: Pick<DiscoverySettings, "regionWords">): string | null {
+  const general = /^(anywhere|worldwide|global|international|apac|asia|emea|latam|remote)$/i;
+  const listedForYou = !!p.location && s.regionWords.some((w) => !general.test(w.trim()) && containsTerm(p.location!, w));
+  const limit = p.onlyFor === undefined ? workRestriction(p.summary, listedForYou) : p.onlyFor;
+  return limit && !(listedForYou && formQuestionOnly(limit)) ? limit : null;
+}
 
 /**
  * Is this job really remote? Only clear evidence counts: the job board marks it remote, or the title,
@@ -578,7 +588,8 @@ export async function runDiscovery(
   const anyonesWords = await allTitleWords(ctx);
   const worthDescribing = (title: string) => anyonesWords.some((w) => containsTerm(title, w));
   type Kept = { company: string | null; postings: Posting[] };
-  const keyOf = (ref: BoardRef) => `board:${boardKey(ref)}`;
+  // "board2": copies that carry each job's "who can apply" check (older copies aren't reused).
+  const keyOf = (ref: BoardRef) => `board2:${boardKey(ref)}`;
   const kept = await readCacheMany<Kept>(ctx.db, boards.map((b) => keyOf(b.ref)), maxAge);
   let reused = 0;
   let fetched = 0;
@@ -704,7 +715,22 @@ export async function runDiscovery(
         continue;
       }
       // Boards whose list leaves descriptions out: fetch this one job's description (one small request).
-      const job = p.summary ? p : { ...p, summary: await fetchPostingSummary(ref, p.id, fetcher) };
+      let job: Posting = p;
+      if (!p.summary || p.onlyFor === undefined) {
+        const got = await fetchPostingSummary(ref, p.id, fetcher);
+        job = { ...p, summary: p.summary ?? got?.summary ?? null, onlyFor: got ? got.onlyFor : p.onlyFor };
+      }
+      // Who can apply: the FULL description (and application form) must not limit it to another country.
+      const limit = whoCanApply(job, settings);
+      if (limit) {
+        attributes.whoCanApply = `NO — ${limit}`;
+        report.filteredOut++;
+        continue;
+      }
+      attributes.whoCanApply =
+        job.onlyFor === undefined
+          ? "UNKNOWN — only the start of the description could be read; check the posting's location requirements"
+          : "YES — the full posting doesn't limit who can apply to another country";
       // Remote only: a job needs clear evidence that it's remote (an office city alone isn't enough).
       attributes.remoteCheck = remoteVerdict(job);
       if (/^NO/.test(String(attributes.remoteCheck))) {
@@ -880,18 +906,19 @@ export async function runDiscovery(
     // 4. Companies whose careers system can't be read whole (Workday, BambooHR, their own website…):
     //    open the job's own page there. Live with the same title → genuine, and it's added.
     const onCareers = (l: Listing) => !!l.applyUrl && !!careersSystem(l.applyUrl, l.company) && !knownJobs.has(sameJob(l.company, l.title));
-    const tried = await readCacheMany<{ title: string | null }>(ctx.db, leftover.filter(onCareers).map((l) => `page:${l.applyUrl}`), PAGE_RETRY_MS);
-    const pageTry = leftover.filter((l) => onCareers(l) && !tried.has(`page:${l.applyUrl}`)).slice(0, MAX_PAGES_PER_SEARCH);
+    const tried = await readCacheMany<{ title: string | null }>(ctx.db, leftover.filter(onCareers).map((l) => `page2:${l.applyUrl}`), PAGE_RETRY_MS);
+    const pageTry = leftover.filter((l) => onCareers(l) && !tried.has(`page2:${l.applyUrl}`)).slice(0, MAX_PAGES_PER_SEARCH);
     const tryUrls = new Set(pageTry.map((l) => l.applyUrl));
     for (const l of leftover) if (!tryUrls.has(l.applyUrl)) listUnconfirmed(l);
     const pageDeadline = Date.now() + 60_000;
-    const pages = await pool(pageTry, 6, async (l) => ({ l, title: Date.now() > pageDeadline ? undefined : await postingPageTitle(l.applyUrl!, fetcher) }));
-    for (const { l, title } of pages) {
-      if (title === undefined) {
+    const pages = await pool(pageTry, 6, async (l) => ({ l, page: Date.now() > pageDeadline ? undefined : await postingPageTitle(l.applyUrl!, fetcher) }));
+    for (const { l, page } of pages) {
+      if (page === undefined) {
         listUnconfirmed(l); // out of time: tried next search
         continue;
       }
-      await writeCache(ctx.db, `page:${l.applyUrl}`, { title });
+      const title = page?.title ?? null;
+      await writeCache(ctx.db, `page2:${l.applyUrl}`, { title });
       const same = !!title && title.split(" | ").some((t) => sameTitle(t, l.title) || (normalizeText(l.title).length >= 5 && normalizeText(t).includes(normalizeText(l.title))));
       if (!same || knownJobs.has(sameJob(l.company, l.title))) {
         if (!same) listUnconfirmed(l);
@@ -911,10 +938,12 @@ export async function runDiscovery(
         workplaceType: "remote",
         remoteCheck: remoteVerdict({ title: l.title, location: l.location, workplace: "remote", summary: l.summary }),
       };
+      const limit = whoCanApply({ location: l.location, onlyFor: page?.onlyFor ?? null }, settings);
+      attributes.whoCanApply = limit ? `NO — ${limit}` : "YES — the job's own page doesn't limit who can apply to another country";
       if (l.location) attributes.postingLocation = l.location;
       if (l.postedAt) attributes.postedOn = l.postedAt;
       const firstLook = evaluate(rules, { account: l.company, opportunity: l.title, location: l.location, sourceBoard: system, ...attributes }, "screen");
-      if (firstLook.fails.length || /^NO/.test(String(attributes.remoteCheck))) {
+      if (firstLook.fails.length || /^NO/.test(String(attributes.remoteCheck)) || limit) {
         report.filteredOut++;
         continue;
       }

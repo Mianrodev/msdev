@@ -10,6 +10,7 @@
  * in job-boards.ts, the one module allowed to go online.
  */
 import { defaultFetcher, plainText, type Fetcher } from "./job-boards";
+import { workRestriction } from "./restrictions";
 
 export type Site = "remotive" | "himalayas" | "workable" | "remoterocketship" | "jobicy" | "remoteok" | "workingnomads" | "weworkremotely";
 
@@ -422,9 +423,10 @@ export function careersSystem(url: string, company: string): string | null {
 
 /**
  * Open one job's page on the company's own careers system and check it's live with the same title.
- * Answers the title the page shows, or null (gone, moved, a different job, or unreadable).
+ * Answers the title the page shows and any "who can apply" limit in its text, or null (gone, moved,
+ * or unreadable).
  */
-export async function postingPageTitle(url: string, fetcher: Fetcher = defaultFetcher): Promise<string | null> {
+export async function postingPageTitle(url: string, fetcher: Fetcher = defaultFetcher): Promise<{ title: string; onlyFor: string | null } | null> {
   try {
     const res = await fetcher(url);
     if (res.status !== 200 || !res.text) return null;
@@ -435,7 +437,10 @@ export async function postingPageTitle(url: string, fetcher: Fetcher = defaultFe
     const og = /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["']/i.exec(page) ?? /<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:title["']/i.exec(page);
     const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(page);
     const h1 = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(page);
-    return [og?.[1], title?.[1], h1?.[1]?.replace(/<[^>]+>/g, " ")].map((t) => (t ? decode(t) : "")).filter(Boolean).join(" | ") || null;
+    const shown = [og?.[1], title?.[1], h1?.[1]?.replace(/<[^>]+>/g, " ")].map((t) => (t ? decode(t) : "")).filter(Boolean).join(" | ");
+    if (!shown) return null;
+    const text = decode(page.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ");
+    return { title: shown, onlyFor: workRestriction(text) };
   } catch {
     return null;
   }
