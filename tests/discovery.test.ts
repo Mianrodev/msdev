@@ -456,3 +456,70 @@ describe("Who can apply (read from the whole posting)", () => {
     expect(rep.filteredOut).toBe(1);
   });
 });
+
+describe("Who can apply — the wordings that slipped through", () => {
+  it("catches common 'another country only' sentences and spares sentences that include India", async () => {
+    const { workRestriction, recruiterSign } = await import("@/sources/restrictions");
+    const { regionVerdictFor, employerVerdict } = await import("@/services/discovery");
+    const yours = ["India", "Anywhere", "APAC"];
+    for (const t of [
+      "This is a US-based role.",
+      "Remote (US)",
+      "Remote - United States",
+      "Location: Remote, United States",
+      "We are only able to hire in the US and Canada at this time.",
+      "This position is open to candidates in the UK only.",
+      "US residents only.",
+      "We can only hire candidates based in the United States.",
+      "Eligible locations: United States, Canada",
+    ])
+      expect(workRestriction(t, false, yours), t).not.toBeNull();
+    for (const t of [
+      "Open to candidates in the US, Canada and India.",
+      "Remote (US or India).",
+      "Salary range shown is for US-based candidates; others are paid in local currency.",
+      "We work US hours but hire anywhere in APAC.",
+      "Location: Remote (India)",
+    ])
+      expect(workRestriction(t, false, yours), t).toBeNull();
+    const s = { regionWords: yours, otherRegionWords: ["United States", "US", "USA", "Europe"] };
+    expect(regionVerdictFor({ title: "Implementation Manager (US only)", location: "Remote" }, s)).toMatch(/^NO — the title says/);
+    expect(regionVerdictFor({ title: "US & India Implementation Manager", location: "Remote - India" }, s)).toMatch(/^YES/);
+    expect(recruiterSign("Weekday AI (client undisclosed - staffing placement)", null)).toMatch(/company name/);
+    expect(recruiterSign("Jobgether", "This position is listed on behalf of a partner company")).toBeNull(); // wording not in the list: no false alarm
+    expect(recruiterSign("Acme", "We are hiring for our client, a fintech.")).toMatch(/posting says/);
+    expect(employerVerdict("Acme", "Acme is a logistics company.")).toMatch(/^YES/);
+  });
+
+  it("treats 'not remote' and office words in the description as not remote", async () => {
+    const { remoteVerdict } = await import("@/services/discovery");
+    expect(remoteVerdict({ title: "Ops Lead", location: "India", summary: "Remote-friendly company. This role is not remote: you will be in our Pune office." })).toMatch(/^NO/);
+    expect(remoteVerdict({ title: "Ops Lead", location: "India", summary: "We are remote-first. This role is hybrid in Bengaluru." })).toMatch(/^NO/);
+    expect(remoteVerdict({ title: "Ops Lead", location: "India", summary: "This is a fully remote role; you can work from anywhere in India." })).toMatch(/^YES/);
+  });
+
+  it("doesn't add a job it couldn't read, and lists skipped jobs with the reason", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    await addBoard(ctx, "https://job-boards.greenhouse.io/acme");
+    const ok = (body: unknown) => ({ status: 200, json: async () => body });
+    const fetcher = async (url: string) => {
+      if (url.endsWith("/v1/boards/acme/jobs"))
+        return ok({
+          jobs: [
+            { id: 1, title: "Implementation Lead", absolute_url: "https://job-boards.greenhouse.io/acme/jobs/1", location: { name: "Remote" } },
+            { id: 2, title: "Implementation Manager", absolute_url: "https://job-boards.greenhouse.io/acme/jobs/2", location: { name: "Remote" } },
+            { id: 3, title: "Implementation Specialist (US only)", absolute_url: "https://job-boards.greenhouse.io/acme/jobs/3", location: { name: "Remote" } },
+          ],
+        });
+      if (url.includes("/jobs/2?questions=true")) return ok({ content: "Fully remote. Open to candidates anywhere. We hire in the US only.", questions: [] });
+      return { status: 500, json: async () => ({}) }; // job 1's description can't be read
+    };
+    const rep = await runDiscovery(ctx, { fetcher, today: "2026-10-03", sites: false });
+    expect(rep.unread).toBe(1);
+    expect(rep.newLeads).toBe(0);
+    expect(rep.skippedTotal).toBe(2);
+    expect(rep.skippedJobs?.map((s) => s.title).sort()).toEqual(["Implementation Manager", "Implementation Specialist (US only)"]);
+    expect(rep.skippedJobs?.find((s) => s.title === "Implementation Manager")?.reason).toMatch(/Who can apply/);
+  });
+});

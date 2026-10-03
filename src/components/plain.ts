@@ -285,7 +285,7 @@ export function describeSearch(d: DiscoveryReport): string[] {
       ? `Found ${plural(d.newLeads, "new job")} matching your words and rules — they're in New to review.`
       : "No new matching jobs this time.",
   ];
-  if (d.filteredOut) lines.push(`Skipped ${plural(d.filteredOut, "matching job")} that fail your rules (not clearly remote, or another region).`);
+  if (d.filteredOut) lines.push(`Skipped ${plural(d.filteredOut, "matching job")} that fail a check (not clearly remote, limited to another country, or another region). Find leads lists them, with the reason.`);
   if (d.stillOpen || d.closed) {
     lines.push(`Checked your leads' links: ${d.stillOpen} still open, ${d.closed} no longer listed (closed).`);
   }
@@ -304,6 +304,7 @@ export function describeSearch(d: DiscoveryReport): string[] {
   if (d.notConfirmedTotal)
     lines.push(`${plural(d.notConfirmedTotal, "job")} on remote-job sites couldn't be confirmed with the company, so ${d.notConfirmedTotal === 1 ? "it wasn't" : "they weren't"} added (see Find leads to check them yourself).`);
   if (d.warningSkipped) lines.push(`Dropped ${plural(d.warningSkipped, "listing")} showing scam warning signs.`);
+  if (d.unread) lines.push(`${plural(d.unread, "matching job")} couldn't be read fully this time, so ${d.unread === 1 ? "it wasn't" : "they weren't"} added yet; the next search tries again.`);
   if (d.capped) lines.push("There were more new jobs than one search adds — the rest will come in next time.");
   if (d.data) {
     const mb = d.data.downloadedKb >= 1024 ? `${(d.data.downloadedKb / 1024).toFixed(1)} MB` : `${d.data.downloadedKb} KB`;

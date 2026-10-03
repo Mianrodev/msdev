@@ -56,12 +56,15 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
             </p>
           )}
           {last.timing && (
-            <p className="small muted" style={{ margin: ".4rem 0 0" }}>
-              Took {Math.round(last.timing.total)} seconds (reading job boards {Math.round(last.timing.boards)}s, remote-job
-              sites {Math.round(last.timing.sites)}s, saving {Math.round(last.timing.saving)}s; server reply time{" "}
-              {last.timing.dbMs} ms).
-            </p>
+            <details className="small muted" style={{ margin: ".4rem 0 0" }}>
+              <summary>
+                Took {last.timing.total >= 90 ? `about ${Math.round(last.timing.total / 60)} minutes` : `${Math.round(last.timing.total)} seconds`}
+              </summary>
+              Reading job boards {Math.round(last.timing.boards)}s, remote-job sites {Math.round(last.timing.sites)}s, saving{" "}
+              {Math.round(last.timing.saving)}s; database reply time {last.timing.dbMs} ms.
+            </details>
           )}
+
           {!!last.companiesConfirmed?.length && (
             <details style={{ marginTop: ".5rem" }}>
               <summary>New companies found ({last.companiesConfirmed.length})</summary>
@@ -75,6 +78,41 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
             </details>
           )}
         </div>
+      )}
+
+      {!!last?.skippedJobs?.length && (
+        <details className="card" style={{ marginTop: "1rem" }}>
+          <summary>Jobs skipped, and why ({last.skippedTotal})</summary>
+          <p className="small muted" style={{ marginTop: ".4rem" }}>
+            These matched your words but failed a check, so they weren&apos;t added. If one looks wrong to you, open it and
+            tell us the wording, so the check can be improved.
+          </p>
+          <div className="table-wrap">
+            <table className="small">
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Job</th>
+                  <th>Where</th>
+                  <th>Why it was skipped</th>
+                </tr>
+              </thead>
+              <tbody>
+                {last.skippedJobs.map((n, i) => (
+                  <tr key={`${n.url}-${i}`}>
+                    <td>{n.company}</td>
+                    <td>
+                      <Ext href={n.url} label={n.title} />
+                    </td>
+                    <td>{n.location ?? "Not stated"}</td>
+                    <td>{n.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {(last.skippedTotal ?? 0) > last.skippedJobs.length && <p className="small muted">Showing the first {last.skippedJobs.length}.</p>}
+        </details>
       )}
 
       {!!last?.notConfirmed?.length && (

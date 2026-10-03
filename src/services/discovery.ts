@@ -40,7 +40,7 @@ import {
   type Posting,
 } from "@/sources/job-boards";
 import { careersSystem, fetchSite, postingPageTitle, SITES, warningSigns, type Listing, type Site } from "@/sources/job-sites";
-import { formQuestionOnly, workRestriction } from "@/sources/restrictions";
+import { formQuestionOnly, recruiterSign, workRestriction } from "@/sources/restrictions";
 import { asSystem, type Ctx } from "./context";
 import { BOARD_FRESH_MS, readCache, readCacheMany, writeCache } from "./source-cache";
 import { logHistory } from "./history";
@@ -129,8 +129,46 @@ export const DEFAULTS = {
     "test automation",
     "quality assurance",
     "CAD",
+    "junior",
+    "jr.",
+    "entry level",
+    "entry-level",
+    "trainee",
+    "fresher",
+    "apprentice",
+    "data entry",
+    "virtual assistant",
+    "executive assistant",
+    "volunteer",
+    "unpaid",
   ],
-  regionWords: ["India", "Anywhere", "Worldwide", "Global", "International", "APAC", "Asia"],
+  regionWords: [
+    "India",
+    "Anywhere",
+    "Worldwide",
+    "Global",
+    "International",
+    "APAC",
+    "Asia",
+    "IST",
+    "Bengaluru",
+    "Bangalore",
+    "Mumbai",
+    "Pune",
+    "Hyderabad",
+    "Chennai",
+    "Delhi",
+    "NCR",
+    "Gurgaon",
+    "Gurugram",
+    "Noida",
+    "Kolkata",
+    "Ahmedabad",
+    "Kochi",
+    "Jaipur",
+    "Chandigarh",
+    "Indore",
+  ],
   otherRegionWords: [
     "United States",
     "USA",
@@ -217,9 +255,29 @@ const SAYS_REMOTE =
  *  job ("authorized to work in the US?") don't count when the job itself names your country. */
 export function whoCanApply(p: { location: string | null; summary?: string | null; onlyFor?: string | null }, s: Pick<DiscoverySettings, "regionWords">): string | null {
   const general = /^(anywhere|worldwide|global|international|apac|asia|emea|latam|remote)$/i;
-  const listedForYou = !!p.location && s.regionWords.some((w) => !general.test(w.trim()) && containsTerm(p.location!, w));
-  const limit = p.onlyFor === undefined ? workRestriction(p.summary, listedForYou) : p.onlyFor;
-  return limit && !(listedForYou && formQuestionOnly(limit)) ? limit : null;
+  const everywhere = /\b(anywhere|worldwide|global|globally|international)\b/i;
+  const listedForYou = !!p.location && (everywhere.test(p.location) || s.regionWords.some((w) => !general.test(w.trim()) && containsTerm(p.location!, w)));
+  const limit = p.onlyFor === undefined ? workRestriction(p.summary, listedForYou, s.regionWords) : p.onlyFor;
+  if (!limit) return null;
+  if (listedForYou && formQuestionOnly(limit)) return null;
+  // The quoted sentence also names your region ("…the US, Canada and India…"): not a limit against you.
+  if (s.regionWords.some((w) => !general.test(w.trim()) && containsTerm(limit, w))) return null;
+  return limit;
+}
+
+/** Region limits written in the TITLE ("(US only)", "US-based") beat the location field. */
+export function regionVerdictFor(p: { title: string; location: string | null; workplace?: string | null }, s: Pick<DiscoverySettings, "regionWords" | "otherRegionWords">): string {
+  const general = /^(anywhere|worldwide|global|international|apac|asia|emea|latam|remote)$/i;
+  const titleMine = s.regionWords.some((w) => !general.test(w.trim()) && containsTerm(p.title, w));
+  const titleOther = s.otherRegionWords.find((w) => containsTerm(p.title, w));
+  if (titleOther && !titleMine) return `NO — the title says "${titleOther}"`;
+  return regionVerdict(p.location, s.regionWords, s.otherRegionWords, p.workplace);
+}
+
+/** Who posted it: the employer, or a recruiter whose client isn't named. Answers start with YES or UNKNOWN. */
+export function employerVerdict(company: string, summary: string | null | undefined): string {
+  const sign = recruiterSign(company, summary);
+  return sign ? `UNKNOWN — looks like a recruiter's posting (${sign}); the real employer isn't named` : "YES — posted by the employer itself";
 }
 
 /**
@@ -237,8 +295,8 @@ export function remoteVerdict(p: { title: string; location: string | null; workp
   const text = p.summary ?? "";
   if (SAYS_REMOTE.test(text)) {
     // "Remote-friendly, 3 days a week in our Bengaluru office" is not remote.
-    if (/\b(hybrid|(\d|one|two|three|four)\s*(days?|x)\s*(a|per|\/|each)\s*week\s*(in|at|from)\s+(\S+\s+){0,3}?office|must be (based|located) (in|near) )/i.test(text))
-      return "NO — the description mentions hybrid or office days";
+    if (NOT_REMOTE.test(text) || /\bmust be (based|located) (in|near) /i.test(text)) return "NO — the description mentions hybrid, on-site or office days";
+    if (/\b(not|no|isn't|is not|never)\s+(a\s+|an\s+)?(fully\s+)?remote\b|\bno remote (work|option)/i.test(text)) return "NO — the description says it's not remote";
     return "YES — the description says it's remote";
   }
   return "NO — the listing doesn't say it's remote";
@@ -517,6 +575,11 @@ export interface DiscoveryReport {
   pagesConfirmed?: number;
   /** Jobs dropped because they show scam warning signs. */
   warningSkipped?: number;
+  /** Matching jobs that were skipped, with the reason (a sample), so a wrong drop can be spotted. */
+  skippedJobs?: { company: string; title: string; url: string; location: string | null; reason: string }[];
+  skippedTotal?: number;
+  /** Matching jobs whose description couldn't be read this time (they're tried again next search). */
+  unread?: number;
   /** How long each part took (seconds), and one database round trip (ms) — for spotting slow set-ups. */
   timing?: { boards: number; sites: number; saving: number; total: number; dbMs: number };
   /** How much was downloaded, and how many boards were reused from a copy read in the last 12 hours. */
@@ -633,6 +696,9 @@ export async function runDiscovery(
     notConfirmedTotal: 0,
     pagesConfirmed: 0,
     warningSkipped: 0,
+    skippedJobs: [],
+    skippedTotal: 0,
+    unread: 0,
   };
 
   // Every posting any existing lead points at (including archived ones — a rejected job isn't re-added).
@@ -640,6 +706,10 @@ export async function runDiscovery(
   const byPosting = new Map<string, RecordRow[]>();
   // Same company + same job title = the same job, even if you saved it from LinkedIn or another site,
   // or the company posted it once per city.
+  const skip = (company: string, title: string, url: string, location: string | null, reason: string) => {
+    report.skippedTotal!++;
+    if (report.skippedJobs!.length < 80) report.skippedJobs!.push({ company, title, url, location, reason: reason.replace(/\s+/g, " ").slice(0, 300) });
+  };
   // "Acme (client undisclosed)" and "Acme" are one company: notes in brackets are ignored.
   const sameJob = (company: string, title: string) => `${normalizeText(company.replace(/\([^)]*\)/g, " "))}|${normalizeText(title)}`;
   const knownJobs = new Set(all.map((r) => sameJob(r.account, r.opportunity)));
@@ -712,12 +782,17 @@ export async function runDiscovery(
       const firstLook = evaluate(rules, { account: company, opportunity: p.title, location: p.location, sourceBoard: PROVIDER_NAMES[ref.provider], ...attributes }, "screen");
       if (firstLook.fails.length) {
         report.filteredOut++;
+        skip(company, p.title, p.url, p.location, firstLook.fails[0].reason);
         continue;
       }
       // Boards whose list leaves descriptions out: fetch this one job's description (one small request).
       let job: Posting = p;
       if (!p.summary || p.onlyFor === undefined) {
         const got = await fetchPostingSummary(ref, p.id, fetcher);
+        if (!got && !p.summary) {
+          report.unread!++; // nothing to judge by: tried again next search
+          continue;
+        }
         job = { ...p, summary: p.summary ?? got?.summary ?? null, onlyFor: got ? got.onlyFor : p.onlyFor };
       }
       // Who can apply: the FULL description (and application form) must not limit it to another country.
@@ -725,6 +800,7 @@ export async function runDiscovery(
       if (limit) {
         attributes.whoCanApply = `NO — ${limit}`;
         report.filteredOut++;
+        skip(company, p.title, p.url, p.location, `Who can apply: ${limit}`);
         continue;
       }
       attributes.whoCanApply =
@@ -735,11 +811,15 @@ export async function runDiscovery(
       attributes.remoteCheck = remoteVerdict(job);
       if (/^NO/.test(String(attributes.remoteCheck))) {
         report.filteredOut++;
+        skip(company, p.title, p.url, p.location, `Remote: ${String(attributes.remoteCheck).replace(/^NO — /, "")}`);
         continue;
       }
+      attributes.employer = employerVerdict(company, job.summary);
       // Even on a careers page, a listing showing scam signs is never added.
-      if (warningSigns(`${job.title}\n${job.summary ?? ""}`).length) {
+      const signs = warningSigns(`${job.title}\n${job.summary ?? ""}`);
+      if (signs.length) {
         report.warningSkipped!++;
+        skip(company, p.title, p.url, p.location, `Scam warning sign: ${signs.join(", ")}`);
         continue;
       }
       let created = false;
@@ -932,7 +1012,7 @@ export async function runDiscovery(
       const site = SITES[l.site].name;
       const attributes: Record<string, unknown> = {
         verifiedOpen: `YES — live on ${l.company}'s own careers page (checked ${today})`,
-        openToYourRegion: regionVerdict(l.location, settings.regionWords, settings.otherRegionWords, "remote"),
+        openToYourRegion: regionVerdictFor({ title: l.title, location: l.location, workplace: "remote" }, settings),
         foundOn: `${site}, confirmed on the company's own careers page (${system})`,
         genuine: `YES — first seen on ${site}, then opened on ${l.company}'s own careers page (${system}), which shows the same job`,
         workplaceType: "remote",
@@ -940,15 +1020,19 @@ export async function runDiscovery(
       };
       const limit = whoCanApply({ location: l.location, onlyFor: page?.onlyFor ?? null }, settings);
       attributes.whoCanApply = limit ? `NO — ${limit}` : "YES — the job's own page doesn't limit who can apply to another country";
+      attributes.employer = employerVerdict(l.company, l.summary);
       if (l.location) attributes.postingLocation = l.location;
       if (l.postedAt) attributes.postedOn = l.postedAt;
       const firstLook = evaluate(rules, { account: l.company, opportunity: l.title, location: l.location, sourceBoard: system, ...attributes }, "screen");
       if (firstLook.fails.length || /^NO/.test(String(attributes.remoteCheck)) || limit) {
         report.filteredOut++;
+        skip(l.company, l.title, l.applyUrl!, l.location, firstLook.fails[0]?.reason ?? (limit ? `Who can apply: ${limit}` : `Remote: ${String(attributes.remoteCheck).replace(/^NO — /, "")}`));
         continue;
       }
-      if (warningSigns(`${l.title}\n${l.summary ?? ""}`).length) {
+      const signs = warningSigns(`${l.title}\n${l.summary ?? ""}`);
+      if (signs.length) {
         report.warningSkipped!++;
+        skip(l.company, l.title, l.applyUrl!, l.location, `Scam warning sign: ${signs.join(", ")}`);
         continue;
       }
       const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
@@ -1029,7 +1113,7 @@ function foundJobAttributes(board: BoardRef, company: string, p: Posting, s: Dis
   const provider = PROVIDER_NAMES[board.provider];
   const attributes: Record<string, unknown> = {
     verifiedOpen: `YES — listed on ${company}'s job board (checked ${today})`,
-    openToYourRegion: regionVerdict(p.location, s.regionWords, s.otherRegionWords, p.workplace),
+    openToYourRegion: regionVerdictFor(p, s),
     foundOn: via ? `${via}, confirmed on the company's ${provider} job board` : `${provider} job board`,
     genuine: via
       ? `YES — first seen on ${via}, then found on a ${provider} careers page under the name "${company}" listing the same job`
