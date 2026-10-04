@@ -16,6 +16,7 @@ import {
 } from "@/services/discovery";
 import { runUpdate } from "@/services/run-update";
 import { listHistory } from "@/services/history";
+import { records } from "@/db/schema";
 import { testCtx } from "./helpers";
 
 const OPEN = "11111111-1111-1111-1111-111111111111";
@@ -916,5 +917,69 @@ describe("Region wording", () => {
     expect(regionVerdict("Remote — hiring worldwide", mine, others, "remote")).toMatch(/^YES/);
     expect(regionVerdict("Remote US", mine, others, "remote")).toMatch(/^NO/);
     expect(regionVerdict("Remote – Chicago", mine, others, "remote")).toMatch(/^NO — remote, but/);
+  });
+});
+
+describe("Existing leads are re-checked against the posting", () => {
+  it("catches 'Remote anywhere in the US' and archives a Ready lead found before the check existed", async () => {
+    const { workRestriction } = await import("@/sources/restrictions");
+    expect(workRestriction("Location Preference: Remote anywhere in the US\n\nAbout The Role: we are seeking…")).toMatch(
+      /another country/,
+    );
+    expect(workRestriction("Remote anywhere in the US.")).not.toBeNull();
+    expect(workRestriction("Work from anywhere in the world.")).toBeNull();
+
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    await addBoard(ctx, "https://job-boards.greenhouse.io/fp");
+    const ok = (body: unknown) => ({ status: 200, json: async () => body });
+    const fetcher = async (url: string) => {
+      if (url.endsWith("/v1/boards/fp/jobs"))
+        return ok({
+          jobs: [
+            {
+              id: 5,
+              title: "Customer Success Engineer - US",
+              absolute_url: "https://job-boards.greenhouse.io/fp/jobs/5",
+              location: { name: "Remote" },
+            },
+          ],
+        });
+      if (url.includes("/jobs/5?questions=true"))
+        return ok({ content: "Fully remote.\n\nLocation Preference: Remote anywhere in the US", questions: [] });
+      return { status: 404, json: async () => ({}) };
+    };
+    // A lead added by an older version: Ready, with the old, incomplete facts.
+    const old = (
+      await upsertLead(
+        ctx,
+        {
+          account: "FP",
+          opportunity: "Customer Success Engineer - US",
+          sourceUrl: "https://job-boards.greenhouse.io/fp/jobs/5",
+          attributes: {
+            whoCanApply: "YES — the full posting doesn't limit who can apply to another country",
+            remoteCheck: "YES — the job board marks it remote",
+            openToYourRegion: "UNKNOWN",
+          },
+        },
+        "discovery",
+      )
+    ).record;
+    await ctx.db.update(records).set({ sourceVerification: "verified" });
+    const ready = await reviewFoundJob(ctx, old.id, "yes");
+    expect(ready).toMatchObject({ stage: "verify", status: "active" });
+
+    // The next search re-judges it from the posting, and the weekly check archives it with the reason.
+    await runDiscovery(ctx, { fetcher, today: "2026-10-08", sites: false });
+    const re = await getRecord(ctx, old.id);
+    expect(re.attributes.whoCanApply).toMatch(/^NO/);
+    expect(re.attributes.openToYourRegion).toMatch(/^NO — the title says/);
+    await runUpdate(ctx);
+    const after = await getRecord(ctx, old.id);
+    expect(after.status).toBe("archived");
+    expect(
+      (await listHistory(ctx, { entityType: "record", entityId: old.id, limit: 50 })).some((h) => h.event === "facts_rechecked"),
+    ).toBe(true);
   });
 });

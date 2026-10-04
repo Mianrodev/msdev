@@ -58,7 +58,15 @@ const LIMITS: [string, RegExp, boolean][] = [
   [
     "remote only within another country",
     new RegExp(
-      `\\bremote\\s*(?:\\(|[-–—:,]\\s*|\\s+(?:in|within|from)\\s+)${PLACES}\\s*\\)?\\s*(?:only)?(?=[\\s.,;:)\\]]|$)`,
+      `\\bremote\\s*(?:\\(|[-–—:,]\\s*|\\s+(?:anywhere\\s+|only\\s+)?(?:in|within|from|across|throughout)\\s+)${PLACES}\\s*\\)?\\s*(?:only)?(?=[\\s.,;:)\\]]|$)`,
+      "i",
+    ),
+    true,
+  ],
+  [
+    "anywhere in another country",
+    new RegExp(
+      `\\b(?:anywhere|any\\s*where|any location|any state)\\s+(?:in|within|across|throughout)\\s+${PLACES}(?=[\\s.,;:)\\]]|$)`,
       "i",
     ),
     true,
@@ -66,7 +74,7 @@ const LIMITS: [string, RegExp, boolean][] = [
   [
     "location given as another country",
     new RegExp(
-      `(?:^|\\n|\\.|;)\\s*(?:work\\s+)?(?:location|eligible locations?|hiring (?:locations?|regions?|countr(?:y|ies))|countr(?:y|ies))\\s*:\\s*(?:remote\\s*[-–—,(]*\\s*)?${PLACES}\\s*\\)?\\s*(?:only)?(?=[\\s.,;)\\]]|$)`,
+      `(?:^|\\n|\\.|;)\\s*(?:work\\s+)?(?:location(?:\\s+preference)?|eligible locations?|hiring (?:locations?|regions?|countr(?:y|ies))|countr(?:y|ies))\\s*:\\s*(?:remote\\s*[-–—,(]*\\s*)?${PLACES}\\s*\\)?\\s*(?:only)?(?=[\\s.,;)\\]]|$)`,
       "i",
     ),
     true,

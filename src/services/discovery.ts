@@ -871,7 +871,9 @@ export async function runDiscovery(
       byUrl.delete(normalizeUrl(p.url));
     }
 
-    // 1. Link check for existing leads on this board.
+    // 1. Link check for existing leads on this board — and a fresh look at the facts that decide them,
+    //    because the checks improve and a job's posting can change (e.g. a line added that limits it to the US).
+    const byId = new Map(postings.map((p) => [postingKey(ref, p.id), p]));
     for (const [k, recs] of byPosting) {
       if (!k.startsWith(`${key}:`)) continue;
       const open = openIds.has(k);
@@ -881,6 +883,8 @@ export async function runDiscovery(
         if (open) report.stillOpen++;
         else report.closed++;
         await markListing(sys, r, open, company, today);
+        const p = byId.get(k);
+        if (open && p && r.origin === DISCOVERY_ORIGIN && !applied(r)) await recheckFacts(sys, r, ref, p, settings, fetcher);
       }
     }
 
@@ -1384,6 +1388,53 @@ async function markListing(sys: Ctx, r: RecordRow, open: boolean, company: strin
     await archiveRecord(sys, r.id, `No longer listed on ${company}'s job board (checked ${today})`);
   }
 }
+
+/**
+ * Re-judge an existing lead's deciding facts from the board's current posting. Changed facts are saved
+ * (the weekly check then archives a lead that now fails a rule, with the reason) and noted in History.
+ */
+async function recheckFacts(sys: Ctx, r: RecordRow, ref: BoardRef, p: Posting, s: DiscoverySettings, fetcher: Fetcher) {
+  let job: Posting = p;
+  if (!p.summary || p.onlyFor === undefined) {
+    const pkey = `posting:${postingKey(ref, p.id)}`;
+    let got = (await readCache<{ summary: string | null; onlyFor: string | null }>(sys.db, pkey, 7 * 86_400_000))?.value ?? null;
+    if (!got) {
+      got = await fetchPostingSummary(ref, p.id, fetcher);
+      if (got) await writeCache(sys.db, pkey, got);
+    }
+    if (!got && !p.summary) return; // nothing new to judge by
+    job = { ...p, summary: p.summary ?? got?.summary ?? null, onlyFor: got ? got.onlyFor : p.onlyFor };
+  }
+  const limit = whoCanApply(job, s);
+  const fresh: Record<string, string> = {
+    openToYourRegion: regionVerdictFor(job, s),
+    remoteCheck: remoteVerdict(job),
+    whoCanApply: limit
+      ? `NO — ${limit}`
+      : job.onlyFor === undefined
+        ? "UNKNOWN — only the start of the description could be read; check the posting's location requirements"
+        : "YES — the full posting doesn't limit who can apply to another country",
+    employer: employerVerdict(r.account, job.summary),
+  };
+  const changed = Object.entries(fresh).filter(([k, v]) => String(r.attributes[k] ?? "").split(" — ")[0] !== v.split(" — ")[0]);
+  if (!changed.length) return;
+  await sys.db
+    .update(records)
+    .set({ attributes: { ...r.attributes, ...fresh }, updatedAt: new Date().toISOString() })
+    .where(and(eq(records.workspaceId, sys.workspaceId), eq(records.id, r.id)));
+  await logHistory(sys, {
+    entityType: "record",
+    entityId: r.id,
+    event: "facts_rechecked",
+    reason: `Re-checked against the posting: ${changed.map(([k, v]) => `${FACT_NAMES[k] ?? k} is now ${v.split(" — ")[0]}`).join(", ")}`,
+  });
+}
+const FACT_NAMES: Record<string, string> = {
+  openToYourRegion: "Open to your region",
+  remoteCheck: "Really remote",
+  whoCanApply: "Who can apply",
+  employer: "Posted by the employer",
+};
 
 function foundJobAttributes(board: BoardRef, company: string, p: Posting, s: DiscoverySettings, today: string, via?: string) {
   const provider = PROVIDER_NAMES[board.provider];
