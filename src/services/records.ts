@@ -189,24 +189,28 @@ export async function upsertLead(ctx: Ctx, input: RecordInput, origin = "manual"
 
   const id = randomUUID();
   const { patch } = mergePatch(undefined, data);
-  await ctx.db
-    .insert(records)
-    .values({
-      ...patch,
-      id,
-      workspaceId: ctx.workspaceId,
-      dedupKey: key,
-      account,
-      opportunity,
-      dateFound: clean(data.dateFound) ?? new Date().toISOString().slice(0, 10),
-      origin,
-    });
+  await ctx.db.insert(records).values({
+    ...patch,
+    id,
+    workspaceId: ctx.workspaceId,
+    dedupKey: key,
+    account,
+    opportunity,
+    dateFound: clean(data.dateFound) ?? new Date().toISOString().slice(0, 10),
+    origin,
+  });
   await logHistory(ctx, {
     entityType: "record",
     entityId: id,
     event: "created",
     newStatus: "active",
-    reason: origin.startsWith("import:") ? `Added from your spreadsheet (${origin.slice(7)} sheet)` : "Added by you",
+    reason: origin.startsWith("import:")
+      ? `Added from your spreadsheet (${origin.slice(7)} sheet)`
+      : origin === "discovery"
+        ? `Found by the job search on ${account}'s careers page${data.sourceBoard ? ` (${data.sourceBoard})` : ""}`
+        : origin === "ai"
+          ? "Added by your AI (not yet confirmed on the company's own site)"
+          : "Added by you",
   });
   return { record: await getRecord(ctx, id), created: true, changed: [] };
 }
@@ -231,9 +235,7 @@ export async function updateRecord(ctx: Ctx, id: string, input: RecordInput, rea
     changed.push("extra");
   }
   if (data.attributes) {
-    const next = Object.fromEntries(
-      Object.entries(data.attributes).map(([k, v]) => [k, isUnknown(v) ? "UNKNOWN" : v]),
-    );
+    const next = Object.fromEntries(Object.entries(data.attributes).map(([k, v]) => [k, isUnknown(v) ? "UNKNOWN" : v]));
     if (JSON.stringify(next) !== JSON.stringify(existing.attributes)) {
       patch.attributes = next;
       changed.push("attributes");
@@ -502,7 +504,12 @@ export function viewCondition(view: View): SQL | undefined {
       return APPLIED_SQL;
     case "review":
       // Jobs found automatically that passed the first look and wait for the owner's yes / hold / no.
-      return and(eq(records.status, "active"), eq(records.origin, "discovery"), sql`${records.stage} in ('discovery','screen')`, notApplied);
+      return and(
+        eq(records.status, "active"),
+        eq(records.origin, "discovery"),
+        sql`${records.stage} in ('discovery','screen')`,
+        notApplied,
+      );
     case "leads":
       return and(
         eq(records.status, "active"),
@@ -532,19 +539,17 @@ export async function listRecords(ctx: Ctx, f: ListFilter = {}): Promise<RecordR
   if (f.tier) conds.push(eq(records.fitTier, f.tier as NonNullable<RecordRow["fitTier"]>));
   if (f.q?.trim()) {
     const q = `%${f.q.trim()}%`;
-    conds.push(
-      or(ilike(records.account, q), ilike(records.opportunity, q), ilike(records.location, q), ilike(records.notes, q)),
-    );
+    conds.push(or(ilike(records.account, q), ilike(records.opportunity, q), ilike(records.location, q), ilike(records.notes, q)));
   }
   const col = SORTABLE[f.sort ?? "updated"] ?? records.updatedAt;
-  const order = (f.dir ?? (f.sort && f.sort !== "updated" && f.sort !== "created" ? "asc" : "desc")) === "asc" ? asc(col) : desc(col);
+  const order =
+    (f.dir ?? (f.sort && f.sort !== "updated" && f.sort !== "created" ? "asc" : "desc")) === "asc" ? asc(col) : desc(col);
   return ctx.db
     .select()
     .from(records)
     .where(and(...conds))
     .orderBy(order, desc(records.updatedAt))
-    .limit(f.limit ?? 1000)
-    ;
+    .limit(f.limit ?? 1000);
 }
 
 export async function countsByView(ctx: Ctx): Promise<Record<View, number>> {
@@ -564,8 +569,7 @@ export async function countsByStage(ctx: Ctx) {
     .select({ stage: records.stage, status: records.status, n: sql<number>`count(*)::int` })
     .from(records)
     .where(eq(records.workspaceId, ctx.workspaceId))
-    .groupBy(records.stage, records.status)
-    ;
+    .groupBy(records.stage, records.status);
 }
 
 /** Every detail name a rule could look at: built-in fields plus the attribute names leads actually have. */

@@ -832,3 +832,14 @@ describe("Closed listings and boards that have gone", () => {
     expect(held.attributes.verifiedOpen).toMatch(/^UNKNOWN — Globex's job board no longer exists/);
   });
 });
+
+describe("Tidy data", () => {
+  it("treats placeholders as empty and ignores bracket notes in company names", async () => {
+    const { isUnknown } = await import("@/core/types");
+    const { normalizeText } = await import("@/core/dedup");
+    for (const v of ["Not checked", "TBD", "-", "?", "N/A", "unknown", ""]) expect(isUnknown(v), v).toBe(true);
+    expect(isUnknown("Bengaluru, India")).toBe(false);
+    expect(normalizeText("Weekday AI (client undisclosed - staffing placement)")).toBe(normalizeText("Weekday AI"));
+    expect(normalizeText("Acme Technologies Pvt. Ltd.")).toBe("acme technologies");
+  });
+});

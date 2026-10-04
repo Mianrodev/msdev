@@ -31,7 +31,12 @@ describe("records", () => {
   it("deduplicates and updates in place, logging the merge", async () => {
     const ctx = await testCtx();
     const a = await upsertLead(ctx, { ...lead, location: "UNKNOWN" });
-    const b = await upsertLead(ctx, { ...lead, account: "ACME Inc.", sourceUrl: "http://www.jobs.example.com/acme/1/", location: "Remote" });
+    const b = await upsertLead(ctx, {
+      ...lead,
+      account: "ACME Inc.",
+      sourceUrl: "http://www.jobs.example.com/acme/1/",
+      location: "Remote",
+    });
     expect(b.created).toBe(false);
     expect(b.record.id).toBe(a.record.id);
     expect(b.record.location).toBe("Remote");
@@ -81,7 +86,9 @@ describe("records", () => {
     const ctx = await testCtx();
     const { record } = await upsertLead(ctx, lead);
     await expect(setOutreachStatus(asSystem(ctx, "x"), record.id, "sent_manually", { humanConfirmed: true })).rejects.toThrow();
-    expect((await setOutreachStatus(ctx, record.id, "sent_manually", { humanConfirmed: true })).outreachStatus).toBe("sent_manually");
+    expect((await setOutreachStatus(ctx, record.id, "sent_manually", { humanConfirmed: true })).outreachStatus).toBe(
+      "sent_manually",
+    );
   });
 });
 
@@ -160,12 +167,18 @@ describe("export", () => {
   it("shared export never includes identity or contact fields", async () => {
     const ctx = await testCtx();
     await setSetting(ctx, IDENTITY_TERMS_KEY, ["Pat Example"]);
-    await upsertLead(ctx, { ...lead, fitRationale: "Pat Example has done this", contactEmail: "r@x.com", preparedBrief: "brief" });
+    await upsertLead(ctx, {
+      ...lead,
+      fitRationale: "Pat Example has done this",
+      contactEmail: "r@x.com",
+      preparedBrief: "brief",
+    });
     const [row] = await exportRecords(ctx, "shared");
-    expect(row.fitRationale).toBe("[REDACTED] has done this");
-    expect(row).not.toHaveProperty("contactEmail");
-    expect(row).not.toHaveProperty("preparedBrief");
+    expect(row["Why it's here"]).toBe("[REDACTED] has done this");
+    expect(Object.keys(row).slice(0, 4)).toEqual(["Company", "Job title", "List", "Where it is"]); // readable, not database codes
+    expect(JSON.stringify(row)).not.toMatch(/r@x\.com|brief|Contact/);
     const [full] = await exportRecords(ctx, "internal");
-    expect(full.contactEmail).toBe("r@x.com");
+    expect(full["Contact email"]).toBe("r@x.com");
+    expect(full["Prepared brief"]).toBe("brief");
   });
 });

@@ -563,7 +563,9 @@ export async function listBoards(ctx: Ctx): Promise<WatchedBoard[]> {
       via: null,
     };
     e.via ??= via;
-    if (name && !/^unknown$/i.test(name) && !/^\[.*\]$/.test(name)) e.names.set(name, (e.names.get(name) ?? 0) + 1);
+    const plainName = name?.replace(/\s*\([^)]*\)\s*$/, "").trim(); // "Weekday AI (client undisclosed)" → "Weekday AI"
+    if (plainName && !/^unknown$/i.test(plainName) && !/^\[.*\]$/.test(plainName))
+      e.names.set(plainName, (e.names.get(plainName) ?? 0) + 1);
     if (countLead) e.leads++;
     e.hand ||= hand;
     boards.set(key, e);
@@ -988,7 +990,7 @@ export async function runDiscovery(
       continue;
     }
     delete failures[b.key];
-    await processBoard(b.ref, b.key, b.company, res.postings);
+    await processBoard(b.ref, b.key, res.company?.trim() || b.company, res.postings);
   }
   await saveInternal(ctx, K.boardFailures, failures);
 

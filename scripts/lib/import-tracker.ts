@@ -35,19 +35,143 @@ import { norm, readWorkbook, type Sheet, type SheetRow } from "./workbook";
 
 export const HEADERS: Record<string, string[][]> = {
   PRIORITY: [
-    ["Fit", "Account", "Opportunity", "Source URL", "Next Step URL", "Location Fit", "Type", "Value Range", "Value Range (Est.)", "Value Fit", "Stage", "Scope", "Requirements", "Gaps (Hard)", "Gaps (Soft)", "Fit Rationale", "Proof Point", "Prepared Brief", "Prepared Answers", "How To Proceed", "Last Verified", "Follow-up Status", "Response Notes", "Notes"],
+    [
+      "Fit",
+      "Account",
+      "Opportunity",
+      "Source URL",
+      "Next Step URL",
+      "Location Fit",
+      "Type",
+      "Value Range",
+      "Value Range (Est.)",
+      "Value Fit",
+      "Stage",
+      "Scope",
+      "Requirements",
+      "Gaps (Hard)",
+      "Gaps (Soft)",
+      "Fit Rationale",
+      "Proof Point",
+      "Prepared Brief",
+      "Prepared Answers",
+      "How To Proceed",
+      "Last Verified",
+      "Follow-up Status",
+      "Response Notes",
+      "Notes",
+    ],
   ],
   "TARGET ACCOUNTS": [
-    ["Fit", "Account", "Contact Name", "Contact Profile", "Source URL", "Stage", "Team Size", "What They Do", "Evidence", "Fit Rationale", "Problem", "Prepared Brief (Short)", "Prepared Brief (Long)", "Response Notes", "Notes"],
+    [
+      "Fit",
+      "Account",
+      "Contact Name",
+      "Contact Profile",
+      "Source URL",
+      "Stage",
+      "Team Size",
+      "What They Do",
+      "Evidence",
+      "Fit Rationale",
+      "Problem",
+      "Prepared Brief (Short)",
+      "Prepared Brief (Long)",
+      "Response Notes",
+      "Notes",
+    ],
   ],
   "RAW LEADS": [
-    ["Account", "Opportunity", "Source URL", "Source Board", "Stage 1 Note", "Stage 1 Verdict", "Next Step", "Location Text", "Value Text", "Date Found", "Raw Status", "Stage 2 Screen", "Stage 2 Reason", "Location Confidence", "Value Status", "Builder Signal", "Hard Gap", "Soft Gap", "Detail Review Status", "Stage 2.5 Screen", "Stage 2.5 Reason", "Opportunity Type", "Builder Intensity", "AI Leverage Potential", "Leadership Proximity", "Engineering Depth", "Level Fit", "Location Fit Confidence", "Value Fit Confidence", "Process Plausibility", "Main Risk", "Stage 3 Status", "Stage 3 Reason", "Verified Open", "Verified Value", "Verified Location Fit"],
+    [
+      "Account",
+      "Opportunity",
+      "Source URL",
+      "Source Board",
+      "Stage 1 Note",
+      "Stage 1 Verdict",
+      "Next Step",
+      "Location Text",
+      "Value Text",
+      "Date Found",
+      "Raw Status",
+      "Stage 2 Screen",
+      "Stage 2 Reason",
+      "Location Confidence",
+      "Value Status",
+      "Builder Signal",
+      "Hard Gap",
+      "Soft Gap",
+      "Detail Review Status",
+      "Stage 2.5 Screen",
+      "Stage 2.5 Reason",
+      "Opportunity Type",
+      "Builder Intensity",
+      "AI Leverage Potential",
+      "Leadership Proximity",
+      "Engineering Depth",
+      "Level Fit",
+      "Location Fit Confidence",
+      "Value Fit Confidence",
+      "Process Plausibility",
+      "Main Risk",
+      "Stage 3 Status",
+      "Stage 3 Reason",
+      "Verified Open",
+      "Verified Value",
+      "Verified Location Fit",
+    ],
   ],
   ARCHIVE: [["Account", "Opportunity", "Reason", "Source URL", "Date", "Notes"]],
   HOLD: [["Account", "Opportunity", "Reason On Hold", "Source URL", "Date", "Next Action Needed"]],
   HISTORY: [
-    ["Fit", "Account", "Opportunity", "Next Step URL", "Location Fit", "Type", "Value Range", "Value Range (Est.)", "Value Fit", "Stage", "Scope", "Requirements", "Gaps (Hard)", "Gaps (Soft)", "Fit Rationale", "Proof Point", "Prepared Brief", "Prepared Answers", "How To Proceed", "Last Verified", "Follow-up Status", "Notes", "Final Status", "Final Reason", "Reverified Date"],
-    ["Account", "Opportunity", "Source URL", "Location Text", "Location Fit", "Type", "Value Range", "Scope", "Gaps", "Verified Status", "Last Verified", "Follow-up Status", "Last Action Date", "Prepared Brief Ref", "Prepared Answers Ref", "Confirmation", "Blocker", "Next Action", "Follow-up Date"],
+    [
+      "Fit",
+      "Account",
+      "Opportunity",
+      "Next Step URL",
+      "Location Fit",
+      "Type",
+      "Value Range",
+      "Value Range (Est.)",
+      "Value Fit",
+      "Stage",
+      "Scope",
+      "Requirements",
+      "Gaps (Hard)",
+      "Gaps (Soft)",
+      "Fit Rationale",
+      "Proof Point",
+      "Prepared Brief",
+      "Prepared Answers",
+      "How To Proceed",
+      "Last Verified",
+      "Follow-up Status",
+      "Notes",
+      "Final Status",
+      "Final Reason",
+      "Reverified Date",
+    ],
+    [
+      "Account",
+      "Opportunity",
+      "Source URL",
+      "Location Text",
+      "Location Fit",
+      "Type",
+      "Value Range",
+      "Scope",
+      "Gaps",
+      "Verified Status",
+      "Last Verified",
+      "Follow-up Status",
+      "Last Action Date",
+      "Prepared Brief Ref",
+      "Prepared Answers Ref",
+      "Confirmation",
+      "Blocker",
+      "Next Action",
+      "Follow-up Date",
+    ],
   ],
 };
 
@@ -76,12 +200,7 @@ const slug = (s: string) =>
 const isUrl = (s: string | undefined) => !!s && /^(https?:\/\/|www\.)\S+$/i.test(s.trim());
 
 /** Canonical verdict text: upper-case, dashes/spaces collapsed. */
-const canon = (s: string | undefined) =>
-  (s ?? "")
-    .toUpperCase()
-    .replace(/[—–-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+const canon = (s: string | undefined) => (s ?? "").toUpperCase().replace(/[—–-]/g, " ").replace(/\s+/g, " ").trim();
 
 export function screenVerdict(s?: string): string | null {
   const c = canon(s);
@@ -182,11 +301,14 @@ function outreachFrom(s?: string): RecordRow["outreachStatus"] | null {
   return null;
 }
 
+/** Spreadsheet placeholders ("Not checked", "TBD", "-", "?") are not values. */
+const PLACEHOLDER = /^(not checked( yet)?|tbd|tba|tbc|pending|none|n\/?a|unknown|-+|—|\?+)$/i;
 function pick(values: Record<string, string>, used: Set<string>, ...names: string[]) {
   for (const n of names) {
     if (values[n] !== undefined) {
       used.add(n);
-      return values[n];
+      const v = values[n];
+      return typeof v === "string" && PLACEHOLDER.test(v.trim()) ? "" : v;
     }
     used.add(n);
   }
@@ -352,7 +474,8 @@ export const DERIVED_CRITERIA: RuleInput[] = [
   {
     key: "criteria.location.not_blocked",
     label: "Location not blocked",
-    description: "From your spreadsheet's rules (location eligibility, on-site roles). If the location check says BLOCKED, the lead is archived.",
+    description:
+      "From your spreadsheet's rules (location eligibility, on-site roles). If the location check says BLOCKED, the lead is archived.",
     appliesFrom: "screen",
     field: "locationConfidence",
     operator: "excludes_all",
@@ -362,7 +485,8 @@ export const DERIVED_CRITERIA: RuleInput[] = [
   {
     key: "criteria.location.verified_fit",
     label: "Verified location fit is not NO",
-    description: "From your spreadsheet's rules (location eligibility). At the final check, if the confirmed location fit is NO (on-site, wrong region…), the lead is archived. Unknown or unclear doesn't count against it.",
+    description:
+      "From your spreadsheet's rules (location eligibility). At the final check, if the confirmed location fit is NO (on-site, wrong region…), the lead is archived. Unknown or unclear doesn't count against it.",
     appliesFrom: "verify",
     field: "verifiedLocationFit",
     operator: "not_starts_with_any",
@@ -382,7 +506,8 @@ export const DERIVED_CRITERIA: RuleInput[] = [
   {
     key: "criteria.value.not_below_floor",
     label: "Verified value not below floor",
-    description: "From your spreadsheet's rules — Compensation floor. Rejects only when verification explicitly recorded the value as below floor.",
+    description:
+      "From your spreadsheet's rules — Compensation floor. Rejects only when verification explicitly recorded the value as below floor.",
     appliesFrom: "verify",
     field: "verifiedValue",
     operator: "excludes_all",
@@ -462,7 +587,16 @@ export async function importWorkbook(ctx: Ctx, src: WorkbookSource, opts: { forc
     // Source rows are buffered and written in bulk at the end (same transaction).
     const pendingRows: (typeof importRows.$inferInsert)[] = [];
     const rowLog: RowLog = (sheet, r, entityType, entityId, outcome) => {
-      pendingRows.push({ workspaceId: c.workspaceId, batchId, sheet, rowNumber: r.rowNumber, raw: { section: r.section, ...r.values }, entityType, entityId, outcome });
+      pendingRows.push({
+        workspaceId: c.workspaceId,
+        batchId,
+        sheet,
+        rowNumber: r.rowNumber,
+        raw: { section: r.section, ...r.values },
+        entityType,
+        entityId,
+        outcome,
+      });
     };
     // CONFIG reference rows are grouped per section and saved once each.
     const configSettings = new Map<string, Record<string, string>>();

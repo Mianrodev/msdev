@@ -15,7 +15,12 @@ export function isUnknown(v: unknown): boolean {
   if (v === null || v === undefined) return true;
   if (typeof v !== "string") return false;
   const s = v.trim().toUpperCase();
-  return s === "" || /^(UNKNOWN|NOT DISCLOSED|NOT STATED|N\/A)(?![A-Z0-9])/.test(s);
+  return (
+    s === "" ||
+    /^(UNKNOWN|NOT DISCLOSED|NOT STATED|NOT CHECKED|NOT CHECKED YET|TBD|TBA|TBC|PENDING|NONE|N\/A|NA|-+|—|\?+)(?![A-Z0-9])/.test(
+      s,
+    )
+  );
 }
 
 /**
@@ -98,17 +103,21 @@ export const OUTREACH_STATUSES = [
   "closed",
 ] as const;
 export type OutreachStatus = (typeof OUTREACH_STATUSES)[number];
-export const HUMAN_ONLY_OUTREACH: readonly OutreachStatus[] = ["approved", "sent_manually", "responded", "interviewing", "offer", "rejected"];
+export const HUMAN_ONLY_OUTREACH: readonly OutreachStatus[] = [
+  "approved",
+  "sent_manually",
+  "responded",
+  "interviewing",
+  "offer",
+  "rejected",
+];
 /** Statuses that mean "you've applied" — such leads live on the Applied list, whatever else happens to them. */
 export const APPLIED_OUTREACH: readonly OutreachStatus[] = ["sent_manually", "responded", "interviewing", "offer", "rejected"];
 
 export const TARGET_ACCOUNT_STATUSES = ["tracking", "hold", "archived"] as const;
 export type TargetAccountStatus = (typeof TARGET_ACCOUNT_STATUSES)[number];
 
-export type Actor =
-  | { kind: "human"; id: string }
-  | { kind: "system"; process: string }
-  | { kind: "import"; batchId: string };
+export type Actor = { kind: "human"; id: string } | { kind: "system"; process: string } | { kind: "import"; batchId: string };
 
 export function actorLabel(a: Actor): string {
   switch (a.kind) {

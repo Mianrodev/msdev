@@ -10,8 +10,9 @@ export function normalizeText(s: string | null | undefined): string {
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
+    .replace(/\([^)]*\)/g, " ") // "Acme (client undisclosed)" is Acme
     .replace(/&/g, " and ")
-    .replace(/\b(inc|llc|ltd|corp|co|corporation|company|the)\b\.?/g, " ")
+    .replace(/\b(inc|llc|ltd|limited|gmbh|plc|pvt|private|corp|co|corporation|company|the)\b\.?/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
