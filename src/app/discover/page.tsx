@@ -3,7 +3,7 @@ import { addBoardAction, discoveryWordsAction, findLeadsAction, toggleBoardActio
 import { SubmitButton } from "@/components/client";
 import { describeSearch, fmtWhen } from "@/components/plain";
 import { Ext, Flash, PageHeader, type SearchParams } from "@/components/ui";
-import { getDiscoverySettings, lastDiscovery, listBoards } from "@/services/discovery";
+import { getDiscoverySettings, hasSavedWords, lastDiscovery, listBoards } from "@/services/discovery";
 import { getCtx } from "@/services/request";
 import { PROVIDER_NAMES } from "@/sources/job-boards";
 import { SITES, type Site } from "@/sources/job-sites";
@@ -24,6 +24,7 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
   const sp = await searchParams;
   const ctx = await getCtx();
   const [settings, boards, last] = await Promise.all([getDiscoverySettings(ctx), listBoards(ctx), lastDiscovery(ctx)]);
+  const wordsSaved = await hasSavedWords(ctx);
   const failed = new Map((last?.boardsFailed ?? []).map((f) => [f.company, f.error]));
   const on = boards.filter((b) => b.enabled).length;
 
@@ -162,6 +163,12 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
       )}
 
       <h2 id="words">What to look for</h2>
+      {!wordsSaved && (
+        <div className="help" style={{ marginBottom: ".8rem", borderLeft: "5px solid var(--warn)" }}>
+          <strong>These are example words, not yours yet.</strong> Replace the job titles with the ones YOU want, and the places
+          with the country you live in, then press Save words. The search won&apos;t run for a team member until they do.
+        </div>
+      )}
       <form action={discoveryWordsAction} className="card stack">
         <p className="muted small" style={{ marginTop: 0 }}>
           One word or phrase per line. A job is added when its <strong>title</strong> contains any word from the first list and

@@ -23,6 +23,7 @@ import { describeSearch, humanize, OUTREACH_NAMES, SOURCE_NAMES, whereItIs } fro
 import {
   addBoard,
   clearFailure,
+  hasSavedWords,
   noteFailure,
   reviewFoundJob,
   runDiscovery,
@@ -33,7 +34,7 @@ import {
 import { saveAnswers, saveProfile } from "@/services/answers";
 import { savePrivacy, PRIVACY_FIELDS, type PrivacyDetails } from "@/services/privacy";
 import { createRule, IDENTITY_TERMS_KEY, setRuleEnabled, setSetting, updateRule } from "@/services/rules";
-import { getCtx } from "@/services/request";
+import { getCtx, getSession } from "@/services/request";
 import type { RuleInput } from "@/core/rules";
 import type { DecisionStage, FitTier, OutreachStatus, SourceVerification } from "@/core/types";
 
@@ -431,8 +432,12 @@ export async function profileAction(f: FormData) {
 
 /** Search the job boards, then run the weekly check. Returns to the page it was pressed on. */
 export async function findLeadsAction(f: FormData) {
-  const ctx = await getCtx();
+  const { ctx, user, viewing } = await getSession();
   const back = str(f, "back") === "/discover" ? "/discover" : "/";
+  if ((viewing ?? user).role === "member" && !(await hasSavedWords(ctx)))
+    redirect(
+      `/discover?error=${encodeURIComponent("Choose what jobs to look for first (the words below are only examples), then press Find new leads.")}#words`,
+    );
   await act(back, async () => {
     let search;
     try {

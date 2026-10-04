@@ -13,10 +13,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getDb } from "@/db/client";
 import { users } from "@/db/schema";
 import { OWNER_ID } from "@/lib/auth";
-import { ensureWorkspace, type Ctx } from "@/services/context";
+import { DEFAULT_WORKSPACE_ID, ensureWorkspace, type Ctx } from "@/services/context";
 import {
   claimScheduledRun,
   clearFailure,
+  hasSavedWords,
   lastDiscovery,
   noteFailure,
   releaseScheduledRun,
@@ -60,6 +61,11 @@ export async function GET(req: NextRequest) {
   for (const workspaceId of spaces) {
     if (Date.now() - started > START_BUDGET_MS) break; // the rest go tomorrow
     const ctx: Ctx = { db, workspaceId, actor: { kind: "system", process: "weekly-schedule" } };
+    // A member who hasn't chosen their words yet isn't searched with somebody else's.
+    if (workspaceId !== DEFAULT_WORKSPACE_ID && !(await hasSavedWords(ctx))) {
+      skipped++;
+      continue;
+    }
     const last = await lastDiscovery(ctx);
     // A search pressed by hand in the last 20 hours is enough.
     if (last && Date.now() - new Date(last.finishedAt).getTime() < 20 * 3_600_000) {

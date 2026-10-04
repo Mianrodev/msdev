@@ -413,6 +413,11 @@ export interface FoundBoard {
 
 const list = (v: unknown, fallback: string[]) => (Array.isArray(v) ? v.map(String).filter(Boolean) : fallback);
 
+/** Has this space chosen its own search words yet? Until then the examples shown are the app's defaults, not theirs. */
+export async function hasSavedWords(ctx: Ctx): Promise<boolean> {
+  return (await getSetting<unknown>(ctx, K.titleWords, null)) !== null;
+}
+
 export async function getDiscoverySettings(ctx: Ctx): Promise<DiscoverySettings> {
   const [t, s, r, o, e, off, offSites, found] = await Promise.all([
     getSetting<unknown>(ctx, K.titleWords, null),

@@ -47,14 +47,15 @@ async function guardedCheck(
   db: Awaited<ReturnType<typeof getDb>>,
   who: UserRow | null,
   password: string,
-): Promise<"ok" | "wrong" | "wait"> {
+): Promise<"ok" | "wrong" | "wait" | "off"> {
   if (!who) {
     await checkOrPretend(null, password);
     return "wrong";
   }
   const ip = await clientIp();
   if (!(await reserveTry(db, who.id, ip))) return "wait";
-  if (!(await checkOrPretend(who, password)) || who.status !== "active") return "wrong";
+  if (!(await checkOrPretend(who, password))) return "wrong";
+  if (who.status !== "active") return "off"; // the right password, but the owner switched this account off
   await clearTries(db, who.id, ip);
   return "ok";
 }
@@ -93,6 +94,10 @@ export async function loginAction(f: FormData) {
   const who = await findSignIn(db, email);
   const result = await guardedCheck(db, who, String(f.get("password") ?? ""));
   if (result === "wait") redirect(back(WAIT_MSG));
+  if (result === "off")
+    redirect(
+      back("Your account has been switched off by the owner. Ask them to switch it back on — nothing of yours has been deleted."),
+    );
   if (result === "wrong") {
     await new Promise((r) => setTimeout(r, 1000)); // slow down guessing
     redirect(back(email ? "Wrong email or password." : "Wrong password. (Team members: type your email too.)"));
@@ -189,7 +194,17 @@ type Made = { code?: string; error?: string } | null;
 async function confirmed(f: FormData) {
   const session = await getSession();
   const result = await guardedCheck(session.ctx.db, session.user, String(f.get("password") ?? ""));
-  return { session, error: result === "ok" ? null : result === "wait" ? WAIT_MSG : "That password isn't right." };
+  return {
+    session,
+    error:
+      result === "ok"
+        ? null
+        : result === "wait"
+          ? WAIT_MSG
+          : result === "off"
+            ? "This account is switched off."
+            : "That password isn't right.",
+  };
 }
 
 /** Shown once on screen; only a hash is kept. */
