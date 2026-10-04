@@ -25,6 +25,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { records, settings as settingsTable, targetAccounts, type RecordRow } from "@/db/schema";
 import { normalizeText, normalizeUrl } from "@/core/dedup";
 import { containsTerm, evaluate, type RuleInput } from "@/core/rules";
+import type { FitTier } from "@/core/types";
 import {
   boardKey,
   boardLink,
@@ -44,7 +45,7 @@ import { formQuestionOnly, recruiterSign, workRestriction } from "@/sources/rest
 import { asSystem, type Ctx } from "./context";
 import { BOARD_FRESH_MS, readCache, readCacheMany, writeCache } from "./source-cache";
 import { logHistory } from "./history";
-import { archiveRecord, decideStage, getRecord, holdRecord, upsertLead } from "./records";
+import { archiveRecord, decideStage, getRecord, holdRecord, restoreRecord, upsertLead } from "./records";
 import { activeRules, createRule, getSetting, listRules, setSetting } from "./rules";
 
 export const DISCOVERY_ORIGIN = "discovery";
@@ -253,10 +254,15 @@ const SAYS_REMOTE =
 
 /** A "who can apply" limit in the job's full text, or null. Form questions some companies ask on every
  *  job ("authorized to work in the US?") don't count when the job itself names your country. */
-export function whoCanApply(p: { location: string | null; summary?: string | null; onlyFor?: string | null }, s: Pick<DiscoverySettings, "regionWords">): string | null {
+export function whoCanApply(
+  p: { location: string | null; summary?: string | null; onlyFor?: string | null },
+  s: Pick<DiscoverySettings, "regionWords">,
+): string | null {
   const general = /^(anywhere|worldwide|global|international|apac|asia|emea|latam|remote)$/i;
   const everywhere = /\b(anywhere|worldwide|global|globally|international)\b/i;
-  const listedForYou = !!p.location && (everywhere.test(p.location) || s.regionWords.some((w) => !general.test(w.trim()) && containsTerm(p.location!, w)));
+  const listedForYou =
+    !!p.location &&
+    (everywhere.test(p.location) || s.regionWords.some((w) => !general.test(w.trim()) && containsTerm(p.location!, w)));
   const limit = p.onlyFor === undefined ? workRestriction(p.summary, listedForYou, s.regionWords) : p.onlyFor;
   if (!limit) return null;
   if (listedForYou && formQuestionOnly(limit)) return null;
@@ -266,7 +272,10 @@ export function whoCanApply(p: { location: string | null; summary?: string | nul
 }
 
 /** Region limits written in the TITLE ("(US only)", "US-based") beat the location field. */
-export function regionVerdictFor(p: { title: string; location: string | null; workplace?: string | null }, s: Pick<DiscoverySettings, "regionWords" | "otherRegionWords">): string {
+export function regionVerdictFor(
+  p: { title: string; location: string | null; workplace?: string | null },
+  s: Pick<DiscoverySettings, "regionWords" | "otherRegionWords">,
+): string {
   const general = /^(anywhere|worldwide|global|international|apac|asia|emea|latam|remote)$/i;
   const titleMine = s.regionWords.some((w) => !general.test(w.trim()) && containsTerm(p.title, w));
   const titleOther = s.otherRegionWords.find((w) => containsTerm(p.title, w));
@@ -277,7 +286,9 @@ export function regionVerdictFor(p: { title: string; location: string | null; wo
 /** Who posted it: the employer, or a recruiter whose client isn't named. Answers start with YES or UNKNOWN. */
 export function employerVerdict(company: string, summary: string | null | undefined): string {
   const sign = recruiterSign(company, summary);
-  return sign ? `UNKNOWN — looks like a recruiter's posting (${sign}); the real employer isn't named` : "YES — posted by the employer itself";
+  return sign
+    ? `UNKNOWN — looks like a recruiter's posting (${sign}); the real employer isn't named`
+    : "YES — posted by the employer itself";
 }
 
 /**
@@ -285,18 +296,26 @@ export function employerVerdict(company: string, summary: string | null | undefi
  * location or description says so. A job that names an office city and doesn't say remote — or says
  * hybrid or on-site anywhere — is not remote. Answers start with YES or NO.
  */
-export function remoteVerdict(p: { title: string; location: string | null; workplace?: string | null; summary?: string | null }): string {
+export function remoteVerdict(p: {
+  title: string;
+  location: string | null;
+  workplace?: string | null;
+  summary?: string | null;
+}): string {
   if (p.workplace === "onsite") return "NO — the job board marks it on-site";
   if (p.workplace === "hybrid") return "NO — the job board marks it hybrid";
   const head = `${p.title}\n${p.location ?? ""}`;
   if (NOT_REMOTE.test(head)) return "NO — the listing says hybrid or office";
   if (p.workplace === "remote") return "YES — the job board marks it remote";
-  if (REMOTE_WORDS.some((w) => containsTerm(head, w)) || /telecommute|home[- ]based/i.test(head)) return "YES — the listing says remote";
+  if (REMOTE_WORDS.some((w) => containsTerm(head, w)) || /telecommute|home[- ]based/i.test(head))
+    return "YES — the listing says remote";
   const text = p.summary ?? "";
   if (SAYS_REMOTE.test(text)) {
     // "Remote-friendly, 3 days a week in our Bengaluru office" is not remote.
-    if (NOT_REMOTE.test(text) || /\bmust be (based|located) (in|near) /i.test(text)) return "NO — the description mentions hybrid, on-site or office days";
-    if (/\b(not|no|isn't|is not|never)\s+(a\s+|an\s+)?(fully\s+)?remote\b|\bno remote (work|option)/i.test(text)) return "NO — the description says it's not remote";
+    if (NOT_REMOTE.test(text) || /\bmust be (based|located) (in|near) /i.test(text))
+      return "NO — the description mentions hybrid, on-site or office days";
+    if (/\b(not|no|isn't|is not|never)\s+(a\s+|an\s+)?(fully\s+)?remote\b|\bno remote (work|option)/i.test(text))
+      return "NO — the description says it's not remote";
     return "YES — the description says it's remote";
   }
   return "NO — the listing doesn't say it's remote";
@@ -326,6 +345,42 @@ export const DISCOVERY_RULES: RuleInput[] = [
     operator: "not_starts_with_any",
     value: ["NO"],
     effect: "reject",
+    enabled: true,
+  },
+  {
+    key: "discovery.remote_check",
+    label: "Clearly remote",
+    description:
+      "The job board marks the job remote, or the listing says so. Jobs that name an office city without saying remote, or mention hybrid, on-site or office days, are archived.",
+    appliesFrom: "screen",
+    field: "remoteCheck",
+    operator: "not_starts_with_any",
+    value: ["NO"],
+    effect: "reject",
+    enabled: true,
+  },
+  {
+    key: "discovery.who_can_apply",
+    label: "Open to people where you live",
+    description:
+      'The whole posting (and the application form) is read for lines like "only open to candidates in the US" or "must be based in the UK". Jobs limited to another country are archived.',
+    appliesFrom: "screen",
+    field: "whoCanApply",
+    operator: "not_starts_with_any",
+    value: ["NO"],
+    effect: "reject",
+    enabled: true,
+  },
+  {
+    key: "discovery.employer_known",
+    label: "Posted by the employer, not a recruiter",
+    description:
+      'Postings by recruiters and agencies ("client undisclosed", "on behalf of our client", staffing firms) don\'t name the real employer, so the job can\'t be checked against the company. They go On hold for you to look at, instead of Ready.',
+    appliesFrom: "screen",
+    field: "employer",
+    operator: "not_starts_with_any",
+    value: ["UNKNOWN"],
+    effect: "hold",
     enabled: true,
   },
 ];
@@ -417,7 +472,10 @@ async function saveInternal(ctx: Ctx, key: string, value: unknown) {
   await ctx.db
     .insert(settingsTable)
     .values({ workspaceId: ctx.workspaceId, key, value })
-    .onConflictDoUpdate({ target: [settingsTable.workspaceId, settingsTable.key], set: { value, updatedAt: new Date().toISOString() } });
+    .onConflictDoUpdate({
+      target: [settingsTable.workspaceId, settingsTable.key],
+      set: { value, updatedAt: new Date().toISOString() },
+    });
 }
 
 export async function saveDiscoveryWords(
@@ -438,7 +496,13 @@ export async function addBoard(ctx: Ctx, link: string): Promise<BoardRef | null>
   const key = boardKey(b);
   const extra = s.extraBoards.filter((x) => detectBoard(x) && boardKey(detectBoard(x)!) !== key);
   await setSetting(ctx, K.extraBoards, [...extra, link.trim()], `Company board added: ${PROVIDER_NAMES[b.provider]} ${b.slug}`);
-  if (s.offBoards.includes(key)) await setSetting(ctx, K.offBoards, s.offBoards.filter((k) => k !== key), "Company board switched on");
+  if (s.offBoards.includes(key))
+    await setSetting(
+      ctx,
+      K.offBoards,
+      s.offBoards.filter((k) => k !== key),
+      "Company board switched on",
+    );
   return b;
 }
 
@@ -479,12 +543,21 @@ export async function listBoards(ctx: Ctx): Promise<WatchedBoard[]> {
       .from(targetAccounts)
       .where(eq(targetAccounts.workspaceId, ctx.workspaceId)),
   ]);
-  const boards = new Map<string, { ref: BoardRef; names: Map<string, number>; leads: number; hand: boolean; via: string | null }>();
+  const boards = new Map<
+    string,
+    { ref: BoardRef; names: Map<string, number>; leads: number; hand: boolean; via: string | null }
+  >();
   const see = (link: string | null, name: string | null, countLead: boolean, hand = false, via: string | null = null) => {
     const b = detectBoard(link);
     if (!b) return;
     const key = boardKey(b);
-    const e = boards.get(key) ?? { ref: { provider: b.provider, slug: b.slug, region: b.region }, names: new Map(), leads: 0, hand: false, via: null };
+    const e = boards.get(key) ?? {
+      ref: { provider: b.provider, slug: b.slug, region: b.region },
+      names: new Map(),
+      leads: 0,
+      hand: false,
+      via: null,
+    };
     e.via ??= via;
     if (name && !/^unknown$/i.test(name) && !/^\[.*\]$/.test(name)) e.names.set(name, (e.names.get(name) ?? 0) + 1);
     if (countLead) e.leads++;
@@ -537,7 +610,13 @@ export function regionVerdict(location: string | null, mine: string[], others: s
   // What's left once remote words and punctuation are removed is a place name.
   let place = location;
   for (const w of REMOTE_WORDS) place = place.replace(new RegExp(`\\b${w}\\b`, "gi"), " ");
-  place = place.replace(/[^\p{L}\p{N}]+/gu, " ").replace(/\b(only|first|friendly|flexible|fully|full|100|completely|any|anytime|location|locations|timezone|time|zones?|based|work|from|home|team|company|wide|or|and|in|the|position|role|options?|opportunity)\b/gi, " ").trim();
+  place = place
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(
+      /\b(only|first|friendly|flexible|fully|full|100|completely|any|anytime|location|locations|timezone|time|zones?|based|work|from|home|team|company|wide|or|and|in|the|position|role|options?|opportunity)\b/gi,
+      " ",
+    )
+    .trim();
   if (place) return `NO — remote, but the listing is for ${location}`;
   return "UNKNOWN";
 }
@@ -626,6 +705,7 @@ export async function runDiscovery(
   } = {},
 ): Promise<DiscoveryReport> {
   const sys = asSystem(ctx, "job-board-search");
+  await seedDiscoveryRules(ctx); // rules added in newer versions apply to everyone's searches
   const started = Date.now();
   let dbMs = Infinity;
   for (let i = 0; i < 3; i++) {
@@ -653,7 +733,11 @@ export async function runDiscovery(
   type Kept = { company: string | null; postings: Posting[] };
   // "board2": copies that carry each job's "who can apply" check (older copies aren't reused).
   const keyOf = (ref: BoardRef) => `board2:${boardKey(ref)}`;
-  const kept = await readCacheMany<Kept>(ctx.db, boards.map((b) => keyOf(b.ref)), maxAge);
+  const kept = await readCacheMany<Kept>(
+    ctx.db,
+    boards.map((b) => keyOf(b.ref)),
+    maxAge,
+  );
   let reused = 0;
   let fetched = 0;
   const getBoard = async (ref: BoardRef): Promise<({ ok: true } & Kept) | { ok: false; error: string }> => {
@@ -665,7 +749,10 @@ export async function runDiscovery(
     const res = await fetchBoard(ref, fetcher);
     if (!res.ok) return res;
     fetched++;
-    const slim: Kept = { company: res.company, postings: res.postings.map((p) => ({ ...p, summary: worthDescribing(p.title) ? p.summary : null })) };
+    const slim: Kept = {
+      company: res.company,
+      postings: res.postings.map((p) => ({ ...p, summary: worthDescribing(p.title) ? p.summary : null })),
+    };
     await writeCache(ctx.db, keyOf(ref), slim);
     kept.set(keyOf(ref), slim);
     return { ok: true, ...slim };
@@ -708,10 +795,12 @@ export async function runDiscovery(
   // or the company posted it once per city.
   const skip = (company: string, title: string, url: string, location: string | null, reason: string) => {
     report.skippedTotal!++;
-    if (report.skippedJobs!.length < 80) report.skippedJobs!.push({ company, title, url, location, reason: reason.replace(/\s+/g, " ").slice(0, 300) });
+    if (report.skippedJobs!.length < 80)
+      report.skippedJobs!.push({ company, title, url, location, reason: reason.replace(/\s+/g, " ").slice(0, 300) });
   };
   // "Acme (client undisclosed)" and "Acme" are one company: notes in brackets are ignored.
-  const sameJob = (company: string, title: string) => `${normalizeText(company.replace(/\([^)]*\)/g, " "))}|${normalizeText(title)}`;
+  const sameJob = (company: string, title: string) =>
+    `${normalizeText(company.replace(/\([^)]*\)/g, " "))}|${normalizeText(title)}`;
   const knownJobs = new Set(all.map((r) => sameJob(r.account, r.opportunity)));
   const byUrl = new Map<string, RecordRow[]>();
   for (const r of all) {
@@ -779,7 +868,17 @@ export async function runDiscovery(
       }
       // Jobs that clearly fail your first-look rules (on-site, another region…) are counted, not added.
       const attributes = foundJobAttributes(ref, company, p, settings, today, via);
-      const firstLook = evaluate(rules, { account: company, opportunity: p.title, location: p.location, sourceBoard: PROVIDER_NAMES[ref.provider], ...attributes }, "screen");
+      const firstLook = evaluate(
+        rules,
+        {
+          account: company,
+          opportunity: p.title,
+          location: p.location,
+          sourceBoard: PROVIDER_NAMES[ref.provider],
+          ...attributes,
+        },
+        "screen",
+      );
       if (firstLook.fails.length) {
         report.filteredOut++;
         skip(company, p.title, p.url, p.location, firstLook.fails[0].reason);
@@ -855,17 +954,31 @@ export async function runDiscovery(
       // Himalayas and Workable are searched with your words and region, so their saved copy is kept per set of words.
       const searched = site === "himalayas" || site === "workable";
       // "v3": the deeper search (copies from a shallower one aren't reused).
-      const key = searched ? `site:${site}:v3:${country ?? ""}:${[...settings.titleWords].sort().join("|").toLowerCase()}` : `site:${site}`;
+      const key = searched
+        ? `site:${site}:v3:${country ?? ""}:${[...settings.titleWords].sort().join("|").toLowerCase()}`
+        : `site:${site}`;
       const hit = await readCache<Listing[]>(ctx.db, key, maxAge);
       if (hit) return { site, res: { ok: true as const, listings: hit.value } };
-      const res = await fetchSite(site, { searchWords: settings.titleWords, country, deadline: tSites + ((opts.siteBudgetMs ?? 90_000) * 3) / 4 }, fetcher);
+      const res = await fetchSite(
+        site,
+        { searchWords: settings.titleWords, country, deadline: tSites + ((opts.siteBudgetMs ?? 90_000) * 3) / 4 },
+        fetcher,
+      );
       // Keep only listings someone could want (their titles match anyone's words).
-      if (res.ok) await writeCache(ctx.db, key, res.listings.filter((l) => worthDescribing(l.title)));
+      if (res.ok)
+        await writeCache(
+          ctx.db,
+          key,
+          res.listings.filter((l) => worthDescribing(l.title)),
+        );
       return { site, res };
     });
     const watchedNames = new Set(allBoards.map((b) => normalizeText(b.company)));
     const watchedKeys = new Set(allBoards.map((b) => b.key));
-    const byCompany = new Map<string, { company: string; hints: Set<string>; listings: Listing[]; workable: boolean; direct: BoardRef[] }>();
+    const byCompany = new Map<
+      string,
+      { company: string; hints: Set<string>; listings: Listing[]; workable: boolean; direct: BoardRef[] }
+    >();
     for (const { site, res } of siteResults) {
       if (!res.ok) {
         report.sitesFailed!.push({ site: SITES[site].name, error: res.error });
@@ -878,12 +991,19 @@ export async function runDiscovery(
         if (/^NO/.test(regionVerdict(l.location, settings.regionWords, settings.otherRegionWords, "remote"))) continue;
         const name = normalizeText(l.company);
         if (!name || watchedNames.has(name) || knownJobs.has(sameJob(l.company, l.title))) continue;
-        const e = byCompany.get(name) ?? { company: l.company, hints: new Set<string>(), listings: [], workable: false, direct: [] as BoardRef[] };
+        const e = byCompany.get(name) ?? {
+          company: l.company,
+          hints: new Set<string>(),
+          listings: [],
+          workable: false,
+          direct: [] as BoardRef[],
+        };
         if (l.companyHint) e.hints.add(l.companyHint);
         if (l.site === "workable") e.workable = true;
         // The site's apply link is on a job board the app reads whole: look there first.
         const d = l.applyUrl ? detectBoard(l.applyUrl) : null;
-        if (d && !e.direct.some((b) => boardKey(b) === boardKey(d))) e.direct.push({ provider: d.provider, slug: d.slug, region: d.region });
+        if (d && !e.direct.some((b) => boardKey(b) === boardKey(d)))
+          e.direct.push({ provider: d.provider, slug: d.slug, region: d.region });
         if (!e.listings.some((x) => sameTitle(x.title, l.title))) {
           e.listings.push(l);
           report.siteMatches!++;
@@ -902,12 +1022,22 @@ export async function runDiscovery(
       }
       report.notConfirmedTotal!++;
       if (report.notConfirmed!.length < 60)
-        report.notConfirmed!.push({ company: l.company, title: l.title, url: l.url, site: SITES[l.site].name, location: l.location });
+        report.notConfirmed!.push({
+          company: l.company,
+          title: l.title,
+          url: l.url,
+          site: SITES[l.site].name,
+          location: l.location,
+        });
     };
 
     // Where each company's careers page is (or that none was found) is shared by everyone's searches.
     const probed = { ...(await getSetting<Record<string, { at: string; link: string | null }>>(ctx, K.probed, {})) };
-    const shared = await readCacheMany<{ link: string | null }>(ctx.db, [...byCompany.keys()].map((n) => `probe:${n}`), RETRY_DAYS * 86_400_000);
+    const shared = await readCacheMany<{ link: string | null }>(
+      ctx.db,
+      [...byCompany.keys()].map((n) => `probe:${n}`),
+      RETRY_DAYS * 86_400_000,
+    );
     const triedRecently = (name: string) => {
       const p = probed[name];
       if (shared.get(`probe:${name}`)?.link === null) return true;
@@ -932,11 +1062,21 @@ export async function runDiscovery(
     for (const [name, e] of companies) if (!tryNames.has(name)) e.listings.forEach(notConfirmed);
 
     const deadline = Date.now() + (opts.siteBudgetMs ?? 90_000);
-    type Try = { name: string; e: (typeof toTry)[number][1]; hit: { ref: BoardRef; res: { company: string | null; postings: Posting[] } } | null; tried: boolean; watched?: boolean };
+    type Try = {
+      name: string;
+      e: (typeof toTry)[number][1];
+      hit: { ref: BoardRef; res: { company: string | null; postings: Posting[] } } | null;
+      tried: boolean;
+      watched?: boolean;
+    };
     const tries = await pool(toTry, 6, async ([name, e]): Promise<Try> => {
       if (Date.now() > deadline) return { name, e, hit: null, tried: false };
       let busy = false; // a board that said "slow down" isn't a board that doesn't exist: try again next time
-      for (const ref of [...e.direct, ...knownBoard(name), ...candidateBoards(e.company, [...e.hints], { workable: e.workable })]) {
+      for (const ref of [
+        ...e.direct,
+        ...knownBoard(name),
+        ...candidateBoards(e.company, [...e.hints], { workable: e.workable }),
+      ]) {
         // Already watched under another name: this search already reads it, nothing to confirm.
         if (watchedKeys.has(boardKey(ref))) return { name, e, hit: null, tried: true, watched: true };
         if (Date.now() > deadline) return { name, e, hit: null, tried: false };
@@ -944,7 +1084,8 @@ export async function runDiscovery(
         if (!res.ok && /rate limited/.test(res.error)) busy = true;
         if (!res.ok || !res.postings.length) continue;
         // The board must really list one of the jobs — a board that merely shares the name doesn't count.
-        if (e.listings.some((l) => res.postings.some((p) => sameTitle(p.title, l.title)))) return { name, e, hit: { ref, res }, tried: true };
+        if (e.listings.some((l) => res.postings.some((p) => sameTitle(p.title, l.title))))
+          return { name, e, hit: { ref, res }, tried: true };
       }
       return { name, e, hit: null, tried: !busy };
     });
@@ -985,13 +1126,21 @@ export async function runDiscovery(
 
     // 4. Companies whose careers system can't be read whole (Workday, BambooHR, their own website…):
     //    open the job's own page there. Live with the same title → genuine, and it's added.
-    const onCareers = (l: Listing) => !!l.applyUrl && !!careersSystem(l.applyUrl, l.company) && !knownJobs.has(sameJob(l.company, l.title));
-    const tried = await readCacheMany<{ title: string | null }>(ctx.db, leftover.filter(onCareers).map((l) => `page2:${l.applyUrl}`), PAGE_RETRY_MS);
+    const onCareers = (l: Listing) =>
+      !!l.applyUrl && !!careersSystem(l.applyUrl, l.company) && !knownJobs.has(sameJob(l.company, l.title));
+    const tried = await readCacheMany<{ title: string | null }>(
+      ctx.db,
+      leftover.filter(onCareers).map((l) => `page2:${l.applyUrl}`),
+      PAGE_RETRY_MS,
+    );
     const pageTry = leftover.filter((l) => onCareers(l) && !tried.has(`page2:${l.applyUrl}`)).slice(0, MAX_PAGES_PER_SEARCH);
     const tryUrls = new Set(pageTry.map((l) => l.applyUrl));
     for (const l of leftover) if (!tryUrls.has(l.applyUrl)) listUnconfirmed(l);
     const pageDeadline = Date.now() + 60_000;
-    const pages = await pool(pageTry, 6, async (l) => ({ l, page: Date.now() > pageDeadline ? undefined : await postingPageTitle(l.applyUrl!, fetcher) }));
+    const pages = await pool(pageTry, 6, async (l) => ({
+      l,
+      page: Date.now() > pageDeadline ? undefined : await postingPageTitle(l.applyUrl!, fetcher),
+    }));
     for (const { l, page } of pages) {
       if (page === undefined) {
         listUnconfirmed(l); // out of time: tried next search
@@ -999,7 +1148,14 @@ export async function runDiscovery(
       }
       const title = page?.title ?? null;
       await writeCache(ctx.db, `page2:${l.applyUrl}`, { title });
-      const same = !!title && title.split(" | ").some((t) => sameTitle(t, l.title) || (normalizeText(l.title).length >= 5 && normalizeText(t).includes(normalizeText(l.title))));
+      const same =
+        !!title &&
+        title
+          .split(" | ")
+          .some(
+            (t) =>
+              sameTitle(t, l.title) || (normalizeText(l.title).length >= 5 && normalizeText(t).includes(normalizeText(l.title))),
+          );
       if (!same || knownJobs.has(sameJob(l.company, l.title))) {
         if (!same) listUnconfirmed(l);
         continue;
@@ -1019,14 +1175,27 @@ export async function runDiscovery(
         remoteCheck: remoteVerdict({ title: l.title, location: l.location, workplace: "remote", summary: l.summary }),
       };
       const limit = whoCanApply({ location: l.location, onlyFor: page?.onlyFor ?? null }, settings);
-      attributes.whoCanApply = limit ? `NO — ${limit}` : "YES — the job's own page doesn't limit who can apply to another country";
+      attributes.whoCanApply = limit
+        ? `NO — ${limit}`
+        : "YES — the job's own page doesn't limit who can apply to another country";
       attributes.employer = employerVerdict(l.company, l.summary);
       if (l.location) attributes.postingLocation = l.location;
       if (l.postedAt) attributes.postedOn = l.postedAt;
-      const firstLook = evaluate(rules, { account: l.company, opportunity: l.title, location: l.location, sourceBoard: system, ...attributes }, "screen");
+      const firstLook = evaluate(
+        rules,
+        { account: l.company, opportunity: l.title, location: l.location, sourceBoard: system, ...attributes },
+        "screen",
+      );
       if (firstLook.fails.length || /^NO/.test(String(attributes.remoteCheck)) || limit) {
         report.filteredOut++;
-        skip(l.company, l.title, l.applyUrl!, l.location, firstLook.fails[0]?.reason ?? (limit ? `Who can apply: ${limit}` : `Remote: ${String(attributes.remoteCheck).replace(/^NO — /, "")}`));
+        skip(
+          l.company,
+          l.title,
+          l.applyUrl!,
+          l.location,
+          firstLook.fails[0]?.reason ??
+            (limit ? `Who can apply: ${limit}` : `Remote: ${String(attributes.remoteCheck).replace(/^NO — /, "")}`),
+        );
         continue;
       }
       const signs = warningSigns(`${l.title}\n${l.summary ?? ""}`);
@@ -1067,11 +1236,19 @@ export async function runDiscovery(
 
   report.finishedAt = new Date().toISOString();
   const total = Date.now() - started;
-  report.timing = { boards: secs(fetchMs), sites: secs(sitesMs), saving: secs(total - fetchMs - sitesMs), total: secs(total), dbMs };
+  report.timing = {
+    boards: secs(fetchMs),
+    sites: secs(sitesMs),
+    saving: secs(total - fetchMs - sitesMs),
+    total: secs(total),
+    dbMs,
+  };
   report.data = { downloadedKb: Math.round(counter.bytes() / 1024), boardsReused: reused, boardsDownloaded: fetched };
   // Internal bookkeeping (the summary shown on the page) — not an owner setting, so no permission or history entry.
   await saveInternal(ctx, K.last, report);
-  const via = report.companiesConfirmed?.length ? `, ${report.companiesConfirmed.length} new companies found through remote-job sites` : "";
+  const via = report.companiesConfirmed?.length
+    ? `, ${report.companiesConfirmed.length} new companies found through remote-job sites`
+    : "";
   await logHistory(sys, {
     entityType: "pipeline_run",
     event: "job_board_search",
@@ -1105,7 +1282,9 @@ async function markListing(sys: Ctx, r: RecordRow, open: boolean, company: strin
     event: "source_verification",
     priorStatus: r.sourceVerification,
     newStatus: target,
-    reason: open ? "Link checked: still listed on the company's job board" : "Link checked: no longer on the company's job board (closed)",
+    reason: open
+      ? "Link checked: still listed on the company's job board"
+      : "Link checked: no longer on the company's job board (closed)",
   });
 }
 
@@ -1127,7 +1306,14 @@ function foundJobAttributes(board: BoardRef, company: string, p: Posting, s: Dis
   return attributes;
 }
 
-async function addFoundJob(sys: Ctx, board: BoardRef, company: string, p: Posting, attributes: Record<string, unknown>, today: string) {
+async function addFoundJob(
+  sys: Ctx,
+  board: BoardRef,
+  company: string,
+  p: Posting,
+  attributes: Record<string, unknown>,
+  today: string,
+) {
   const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
   const { record, created } = await upsertLead(
     sys,
@@ -1161,14 +1347,32 @@ export async function lastDiscovery(ctx: Ctx): Promise<DiscoveryReport | null> {
  * owner's reason (so it becomes Ready if it still passes every rule), "hold"
  * and "no" move it to On hold / Archived.
  */
-export async function reviewFoundJob(ctx: Ctx, id: string, choice: "yes" | "hold" | "no"): Promise<RecordRow> {
-  if (choice === "hold") return holdRecord(ctx, id, "Reviewed by you: not sure yet", "Decide whether to apply");
-  if (choice === "no") return archiveRecord(ctx, id, "Reviewed by you: not for me");
+export async function reviewFoundJob(
+  ctx: Ctx,
+  id: string,
+  choice: "yes" | "hold" | "no",
+  opts: { by?: "you" | "your AI"; fit?: FitTier; why?: string } = {},
+): Promise<RecordRow> {
+  const by = opts.by === "your AI" ? "Sorted by your AI" : "Reviewed by you";
+  const why = opts.why?.trim();
+  if (choice === "hold") return holdRecord(ctx, id, `${by}: ${why || "not sure yet"}`, "Decide whether to apply");
+  if (choice === "no") return archiveRecord(ctx, id, `${by}: ${why || "not for me"}`);
   let r = await getRecord(ctx, id);
-  const reason = "Reviewed by you: worth applying";
+  if (r.status !== "active") r = await restoreRecord(ctx, id, `${by}: worth applying after all`);
+  const reason = `${by}: ${why || "worth applying"}`;
+  const tier = opts.fit ? (`tier_${opts.fit}` as const) : r.fitTier ? (`tier_${r.fitTier}` as const) : "tier_good";
   if (r.stage === "discovery") r = await decideStage(ctx, id, { stage: "screen", verdict: "keep_possible", reason });
   if (r.stage === "screen") r = await decideStage(ctx, id, { stage: "triage", verdict: "top_priority", reason });
-  if (r.stage === "triage") r = await decideStage(ctx, id, { stage: "verify", verdict: "tier_good", reason });
+  if (r.stage === "triage") r = await decideStage(ctx, id, { stage: "verify", verdict: tier, reason });
+  // The rating is the reviewer's, not a default: without one, Ready shows "not yet rated".
+  const fitTier = opts.fit ?? (r.fitRationale && r.fitTier ? r.fitTier : null);
+  if (fitTier !== r.fitTier || (why && why !== r.fitRationale) || r.verifyReason !== reason) {
+    await ctx.db
+      .update(records)
+      .set({ fitTier, verifyReason: reason, ...(why ? { fitRationale: why } : {}), updatedAt: new Date().toISOString() })
+      .where(and(eq(records.workspaceId, ctx.workspaceId), eq(records.id, id)));
+    r = await getRecord(ctx, id);
+  }
   return r;
 }
 

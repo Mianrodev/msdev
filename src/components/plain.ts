@@ -151,7 +151,7 @@ export function whereItIs(r: ListInput & Pick<RecordRow, "fitTier">): string {
   const list = listOf(r);
   if (list === "applied") return r.outreachStatus === "sent_manually" ? "Applied" : `Applied — ${OUTREACH_NAMES[r.outreachStatus ?? ""]}`;
   if (list === "review") return "New — waiting for your review";
-  if (list === "ready") return r.fitTier ? `Ready — ${TIER_NAMES[r.fitTier].toLowerCase()}` : "Ready";
+  if (list === "ready") return r.fitTier ? `Ready — ${TIER_NAMES[r.fitTier].toLowerCase()}` : "Ready — not yet rated";
   if (list === "checking") {
     return r.stage === "discovery" ? "New — not checked yet" : `Being checked (${STEP_NAMES[r.stage].toLowerCase()})`;
   }

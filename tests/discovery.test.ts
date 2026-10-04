@@ -92,18 +92,20 @@ describe("finding leads", () => {
     expect(india.attributes).toMatchObject({ workplaceType: "remote", employmentType: "Full Time", postedOn: "2026-09-20" });
     expect(india.extra.postingSummary).toBe("About the Implementation Specialist role.");
 
-    // Weekly check: the closed held lead is archived; the good find waits for review
-    // instead of becoming Ready by itself.
+    // Weekly check: the closed held lead is archived; the good find passed every check, so it is Ready
+    // to apply to — marked "not yet rated" rather than given an invented rating.
     await runUpdate(ctx);
     const after = async (title: string) => (await listRecords(ctx)).find((r) => r.opportunity === title)!;
     expect((await getRecord(ctx, gone.id)).status).toBe("archived");
-    expect(await after("Implementation Specialist")).toMatchObject({ status: "active", stage: "screen" });
-    expect((await listRecords(ctx, { view: "review" })).map((r) => r.opportunity)).toEqual(["Implementation Specialist"]);
-    expect((await listRecords(ctx, { view: "leads" })).map((r) => r.opportunity)).not.toContain("Implementation Specialist");
+    expect(await after("Implementation Specialist")).toMatchObject({ status: "active", stage: "verify", fitTier: null });
+    expect((await after("Implementation Specialist")).fitRationale).toMatch(/^Passed every check \(.*remote.*\)\. Not yet rated/);
+    expect((await listRecords(ctx, { view: "review" })).map((r) => r.opportunity)).toEqual([]);
+    expect((await listRecords(ctx, { view: "prospects" })).map((r) => r.opportunity)).toContain("Implementation Specialist");
 
-    // Review: yes → Ready.
-    const ready = await reviewFoundJob(ctx, india.id, "yes");
-    expect(ready).toMatchObject({ stage: "verify", status: "active", fitTier: "good" });
+    // The owner's AI rates it: the rating and the why become the lead's own fields.
+    const ready = await reviewFoundJob(ctx, india.id, "yes", { by: "your AI", fit: "strong", why: "Implementation is your core work; remote India." });
+    expect(ready).toMatchObject({ stage: "verify", status: "active", fitTier: "strong", fitRationale: "Implementation is your core work; remote India." });
+    expect(ready.verifyReason).toMatch(/^Sorted by your AI: /);
 
     // Running again adds nothing twice (even archived jobs aren't re-added).
     const rep2 = await runDiscovery(ctx, { fetcher: fetcher(), today: "2026-10-07" });

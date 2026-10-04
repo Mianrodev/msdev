@@ -47,6 +47,20 @@ export interface RunSummary {
   changes: { id: string; account: string; opportunity: string; from: string; to: string }[];
 }
 
+/** "remote, open to you, who can apply, still listed" — the checks a found job passed, in plain words. */
+function passedChecks(ev: { passes: { field: string }[] }): string {
+  const names: Record<string, string> = {
+    remoteCheck: "remote",
+    openToYourRegion: "open to your region",
+    whoCanApply: "open to people where you live",
+    verifiedOpen: "still listed",
+    workplaceType: "not on-site",
+    employer: "posted by the employer",
+  };
+  const words = ev.passes.map((p) => names[p.field]).filter(Boolean);
+  return words.length ? [...new Set(words)].join(", ") : "every rule";
+}
+
 const STAGE_FROM: Record<DecisionStage, "discovery" | "screen" | "triage"> = {
   screen: "discovery",
   triage: "screen",
@@ -83,9 +97,6 @@ export async function runUpdate(ctx: Ctx): Promise<RunSummary> {
     for (const stage of ["screen", "triage", "verify"] as const) {
       const counts: StageCounts = { in: 0, advanced: 0, held: 0, archived: 0 };
       for (const r of await scoped(STAGE_FROM[stage])) {
-        // Jobs found automatically get the automatic first look, then wait for the owner's review
-        // (the "New to review" list) rather than being promoted by rules alone.
-        if (stage !== "screen" && r.origin === "discovery" && r.stage === "screen") continue;
         counts.in++;
         const evaluation = await evaluateRecord(sys, r, stage);
         const verdict = suggestVerdict(stage, evaluation, r.sourceVerification)!;
@@ -93,11 +104,26 @@ export async function runUpdate(ctx: Ctx): Promise<RunSummary> {
           stage === "verify" && verdict === "hold_needs_info" && r.sourceVerification !== "verified" && !evaluation.holds.length
             ? `the listing ${r.sourceVerification === "unreachable" ? "couldn't be reached" : "hasn't been checked yet"} — check the link is still open`
             : summarize(evaluation);
-        const after = await decideStage(sys, r.id, {
+        // A found job that passes every check is Ready to apply to — but the checks don't rate fit, so
+        // it says "not yet rated" until the owner or their AI rates it (never an invented "good fit").
+        const foundJob = r.origin === "discovery" && stage === "verify" && verdict.startsWith("tier_");
+        let after = await decideStage(sys, r.id, {
           stage,
           verdict,
-          reason: `Weekly check: ${VERDICT_LABELS[verdict]} — ${why}`,
+          reason: foundJob
+            ? `Passed every check: ${passedChecks(evaluation)}`
+            : `Weekly check: ${VERDICT_LABELS[verdict]} — ${why}`,
         });
+        if (foundJob && !r.fitRationale) {
+          await sys.db
+            .update(records)
+            .set({
+              fitTier: null,
+              fitRationale: `Passed every check (${passedChecks(evaluation)}). Not yet rated against your profile.`,
+            })
+            .where(and(eq(records.workspaceId, c.workspaceId), eq(records.id, r.id)));
+          after = { ...after, fitTier: null };
+        }
         const effect = verdictEffect(verdict);
         if (effect === "advance") counts.advanced++;
         else if (effect === "hold") counts.held++;
@@ -130,16 +156,14 @@ export async function runUpdate(ctx: Ctx): Promise<RunSummary> {
       changes,
     };
 
-    await sys.db
-      .insert(pipelineRuns)
-      .values({
-        id: runId,
-        workspaceId: c.workspaceId,
-        actor: actorLabel(ctx.actor),
-        summary: summary as unknown as Record<string, unknown>,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-      });
+    await sys.db.insert(pipelineRuns).values({
+      id: runId,
+      workspaceId: c.workspaceId,
+      actor: actorLabel(ctx.actor),
+      summary: summary as unknown as Record<string, unknown>,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+    });
     await logHistory(sys, {
       entityType: "pipeline_run",
       entityId: runId,
@@ -156,12 +180,14 @@ export function formatSummary(s: RunSummary): string {
   const st = s.stages;
   const processed = st.screen.in + (st.triage.in - st.screen.advanced) + (st.verify.in - st.triage.advanced);
   const ready = Object.values(s.activeProspectsByTier).reduce((x, y) => x + y, 0);
-  return [
-    `Re-checked ${s.reconciliation.prospectsChecked} Ready and ${s.reconciliation.heldChecked} On-hold leads`,
-    `moved ${processed} waiting leads through the checks (${st.verify.advanced} became Ready)`,
-    `${s.movedToHold} moved to On hold, ${s.movedToArchive} moved to Archived`,
-    `${ready} Ready now`,
-  ].join("; ") + ".";
+  return (
+    [
+      `Re-checked ${s.reconciliation.prospectsChecked} Ready and ${s.reconciliation.heldChecked} On-hold leads`,
+      `moved ${processed} waiting leads through the checks (${st.verify.advanced} became Ready)`,
+      `${s.movedToHold} moved to On hold, ${s.movedToArchive} moved to Archived`,
+      `${ready} Ready now`,
+    ].join("; ") + "."
+  );
 }
 
 export async function listRuns(ctx: Ctx, limit = 20) {
