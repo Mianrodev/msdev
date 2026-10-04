@@ -27,6 +27,7 @@ import { normalizeText, normalizeUrl } from "@/core/dedup";
 import { containsTerm, evaluate, type RuleInput } from "@/core/rules";
 import type { FitTier } from "@/core/types";
 import {
+  BOARD_GONE,
   boardKey,
   boardLink,
   candidateBoards,
@@ -42,6 +43,7 @@ import {
 } from "@/sources/job-boards";
 import { careersSystem, fetchSite, postingPageTitle, SITES, warningSigns, type Listing, type Site } from "@/sources/job-sites";
 import { formQuestionOnly, recruiterSign, workRestriction } from "@/sources/restrictions";
+import { applied } from "@/components/plain";
 import { asSystem, type Ctx } from "./context";
 import { BOARD_FRESH_MS, readCache, readCacheMany, writeCache } from "./source-cache";
 import { logHistory } from "./history";
@@ -57,6 +59,8 @@ const K = {
   otherRegionWords: "discovery.otherRegionWords",
   extraBoards: "discovery.extraBoards",
   offBoards: "discovery.offBoards",
+  /** Boards that failed last time, and how many times in a row (a board gone twice is switched off). */
+  boardFailures: "discovery.boardFailures",
   offSites: "discovery.offSites",
   /** Company boards found through remote-job sites (internal bookkeeping). */
   foundBoards: "discovery.foundBoards",
@@ -659,6 +663,8 @@ export interface DiscoveryReport {
   skippedTotal?: number;
   /** Matching jobs whose description couldn't be read this time (they're tried again next search). */
   unread?: number;
+  /** Companies whose job board has gone (answered "not found" twice): switched off, their jobs put on hold. */
+  boardsGone?: string[];
   /** How long each part took (seconds), and one database round trip (ms) — for spotting slow set-ups. */
   timing?: { boards: number; sites: number; saving: number; total: number; dbMs: number };
   /** How much was downloaded, and how many boards were reused from a copy read in the last 12 hours. */
@@ -786,6 +792,7 @@ export async function runDiscovery(
     skippedJobs: [],
     skippedTotal: 0,
     unread: 0,
+    boardsGone: [],
   };
 
   // Every posting any existing lead points at (including archived ones — a rejected job isn't re-added).
@@ -936,13 +943,54 @@ export async function runDiscovery(
     }
   };
 
+  const failures = {
+    ...(await getSetting<Record<string, { count: number; error: string; at: string }>>(ctx, K.boardFailures, {})),
+  };
   for (const { b, res } of results) {
     if (!res.ok) {
       report.boardsFailed.push({ company: b.company, error: res.error });
+      const gone = BOARD_GONE.test(res.error);
+      const count = gone ? (failures[b.key]?.count ?? 0) + 1 : 0;
+      failures[b.key] = { count, error: res.error, at: today };
+      // Gone twice in a row (two searches, usually two weeks): stop asking, and don't let its jobs sit as "listed".
+      if (gone && count >= 2 && !settings.offBoards.includes(b.key)) {
+        await setBoardEnabled(ctx, b.key, false);
+        report.boardsGone!.push(b.company);
+        for (const [k, recs] of byPosting) {
+          if (!k.startsWith(`${b.key}:`)) continue;
+          for (const r of recs) {
+            if (r.status !== "active" || applied(r)) continue;
+            await sys.db
+              .update(records)
+              .set({
+                attributes: {
+                  ...r.attributes,
+                  verifiedOpen: `UNKNOWN — ${b.company}'s job board no longer exists at this address (checked ${today})`,
+                },
+                updatedAt: new Date().toISOString(),
+              })
+              .where(and(eq(records.workspaceId, sys.workspaceId), eq(records.id, r.id)));
+            await holdRecord(
+              sys,
+              r.id,
+              `${b.company}'s job board has gone, so this listing can't be checked any more`,
+              "Open the listing link yourself; if it's gone, archive this lead",
+            );
+          }
+        }
+        await logHistory(sys, {
+          entityType: "setting",
+          entityId: K.offBoards,
+          event: "company_board_off",
+          reason: `${b.company}'s job board answered "not found" twice in a row, so it was switched off. Its leads were put on hold.`,
+        });
+      }
       continue;
     }
+    delete failures[b.key];
     await processBoard(b.ref, b.key, b.company, res.postings);
   }
+  await saveInternal(ctx, K.boardFailures, failures);
 
   // 3. Remote-job sites → companies you don't watch yet → confirmed on their own careers board.
   if (opts.sites !== false) {
@@ -1081,7 +1129,7 @@ export async function runDiscovery(
         if (watchedKeys.has(boardKey(ref))) return { name, e, hit: null, tried: true, watched: true };
         if (Date.now() > deadline) return { name, e, hit: null, tried: false };
         const res = await getBoard(ref);
-        if (!res.ok && /rate limited/.test(res.error)) busy = true;
+        if (!res.ok && /slow down/.test(res.error)) busy = true;
         if (!res.ok || !res.postings.length) continue;
         // The board must really list one of the jobs — a board that merely shares the name doesn't count.
         if (e.listings.some((l) => res.postings.some((p) => sameTitle(p.title, l.title))))
@@ -1286,6 +1334,10 @@ async function markListing(sys: Ctx, r: RecordRow, open: boolean, company: strin
       ? "Link checked: still listed on the company's job board"
       : "Link checked: no longer on the company's job board (closed)",
   });
+  // A closed listing is archived (unless you applied to it: then it stays on your Applied list).
+  if (!open && r.status === "active" && !applied(r)) {
+    await archiveRecord(sys, r.id, `No longer listed on ${company}'s job board (checked ${today})`);
+  }
 }
 
 function foundJobAttributes(board: BoardRef, company: string, p: Posting, s: DiscoverySettings, today: string, via?: string) {

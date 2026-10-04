@@ -3,7 +3,17 @@ import { candidateBoards, detectBoard } from "@/sources/job-boards";
 import { fetchSite, warningSigns } from "@/sources/job-sites";
 import { listRecords, getRecord, upsertLead, holdRecord } from "@/services/records";
 import { createRule } from "@/services/rules";
-import { addBoard, listBoards, regionVerdict, remoteVerdict, reviewFoundJob, runDiscovery, seedDiscoveryRules, titleMatches, DEFAULTS } from "@/services/discovery";
+import {
+  addBoard,
+  listBoards,
+  regionVerdict,
+  remoteVerdict,
+  reviewFoundJob,
+  runDiscovery,
+  seedDiscoveryRules,
+  titleMatches,
+  DEFAULTS,
+} from "@/services/discovery";
 import { runUpdate } from "@/services/run-update";
 import { listHistory } from "@/services/history";
 import { testCtx } from "./helpers";
@@ -27,21 +37,46 @@ const board = [
   job("66666666-6666-6666-6666-666666666666", "Account Executive", "Remote - India"),
   job("77777777-7777-7777-7777-777777777777", "Director of Implementation", "Remote"),
 ];
-const fetcher = (ok = true) => async (url: string) => {
-  if (!ok || !url.includes("/v0/postings/acme")) return { status: 404, json: async () => ({}) };
-  return { status: 200, json: async () => board };
-};
+const fetcher =
+  (ok = true) =>
+  async (url: string) => {
+    if (!ok || !url.includes("/v0/postings/acme")) return { status: 404, json: async () => ({}) };
+    return { status: 200, json: async () => board };
+  };
 
 describe("job board links", () => {
   it("recognises the four boards and posting ids", () => {
-    expect(detectBoard(`https://jobs.lever.co/acme/${OPEN}/apply`)).toMatchObject({ provider: "lever", slug: "acme", postingId: OPEN });
-    expect(detectBoard("https://job-boards.greenhouse.io/tebra/jobs/4708633005")).toMatchObject({ provider: "greenhouse", slug: "tebra", postingId: "4708633005" });
-    expect(detectBoard("https://jobs.ashbyhq.com/Scale%20Army%20Careers")).toMatchObject({ provider: "ashby", slug: "Scale Army Careers" });
-    expect(detectBoard("https://apply.workable.com/huzzle/j/991B0F2A1C/")).toMatchObject({ provider: "workable", slug: "huzzle", postingId: "991B0F2A1C" });
+    expect(detectBoard(`https://jobs.lever.co/acme/${OPEN}/apply`)).toMatchObject({
+      provider: "lever",
+      slug: "acme",
+      postingId: OPEN,
+    });
+    expect(detectBoard("https://job-boards.greenhouse.io/tebra/jobs/4708633005")).toMatchObject({
+      provider: "greenhouse",
+      slug: "tebra",
+      postingId: "4708633005",
+    });
+    expect(detectBoard("https://jobs.ashbyhq.com/Scale%20Army%20Careers")).toMatchObject({
+      provider: "ashby",
+      slug: "Scale Army Careers",
+    });
+    expect(detectBoard("https://apply.workable.com/huzzle/j/991B0F2A1C/")).toMatchObject({
+      provider: "workable",
+      slug: "huzzle",
+      postingId: "991B0F2A1C",
+    });
     expect(detectBoard("https://www.linkedin.com/jobs/view/1")).toBeNull();
-    expect(detectBoard("https://bunq.recruitee.com/o/ios-developer-3")).toMatchObject({ provider: "recruitee", slug: "bunq", postingId: "ios-developer-3" });
+    expect(detectBoard("https://bunq.recruitee.com/o/ios-developer-3")).toMatchObject({
+      provider: "recruitee",
+      slug: "bunq",
+      postingId: "ios-developer-3",
+    });
     expect(detectBoard("https://bunq.recruitee.com/")).toMatchObject({ provider: "recruitee", slug: "bunq" });
-    expect(detectBoard("https://jobs.smartrecruiters.com/Acme/744000148454651-data-consultant")).toMatchObject({ provider: "smartrecruiters", slug: "Acme", postingId: "744000148454651" });
+    expect(detectBoard("https://jobs.smartrecruiters.com/Acme/744000148454651-data-consultant")).toMatchObject({
+      provider: "smartrecruiters",
+      slug: "Acme",
+      postingId: "744000148454651",
+    });
     expect(candidateBoards("Globex Labs, Inc.").map((b) => `${b.provider}:${b.slug}`)).toContain("lever:globexlabs");
     expect(candidateBoards("Globex Labs, Inc.").map((b) => `${b.provider}:${b.slug}`)).toContain("greenhouse:globex-labs");
   });
@@ -73,14 +108,37 @@ describe("finding leads", () => {
   it("checks links, adds matching jobs once, and sorts them", async () => {
     const ctx = await testCtx();
     await seedDiscoveryRules(ctx);
-    await createRule(ctx, { key: "open", label: "Listing still open", appliesFrom: "verify", field: "verifiedOpen", operator: "not_starts_with_any", value: ["NO"] });
-    const existing = (await upsertLead(ctx, { account: "Acme", opportunity: "Implementation Consultant", sourceUrl: `https://jobs.lever.co/acme/${OPEN}` })).record;
-    const gone = (await upsertLead(ctx, { account: "Acme", opportunity: "Ops Analyst", sourceUrl: `https://jobs.lever.co/acme/${CLOSED}` })).record;
+    await createRule(ctx, {
+      key: "open",
+      label: "Listing still open",
+      appliesFrom: "verify",
+      field: "verifiedOpen",
+      operator: "not_starts_with_any",
+      value: ["NO"],
+    });
+    const existing = (
+      await upsertLead(ctx, {
+        account: "Acme",
+        opportunity: "Implementation Consultant",
+        sourceUrl: `https://jobs.lever.co/acme/${OPEN}`,
+      })
+    ).record;
+    const gone = (
+      await upsertLead(ctx, { account: "Acme", opportunity: "Ops Analyst", sourceUrl: `https://jobs.lever.co/acme/${CLOSED}` })
+    ).record;
     await holdRecord(ctx, gone.id, "Not sure");
 
     const rep = await runDiscovery(ctx, { fetcher: fetcher(), today: "2026-09-30" });
     // US-only and on-site jobs fail the first-look rules, so they're counted but never added.
-    expect(rep).toMatchObject({ boardsChecked: 1, jobsSeen: 6, stillOpen: 1, closed: 1, newLeads: 1, filteredOut: 2, alreadyKnown: 1 });
+    expect(rep).toMatchObject({
+      boardsChecked: 1,
+      jobsSeen: 6,
+      stillOpen: 1,
+      closed: 1,
+      newLeads: 1,
+      filteredOut: 2,
+      alreadyKnown: 1,
+    });
     expect(await getRecord(ctx, existing.id)).toMatchObject({ sourceVerification: "verified" });
     expect((await getRecord(ctx, existing.id)).attributes.verifiedOpen).toMatch(/^YES/);
     expect((await getRecord(ctx, gone.id)).attributes.verifiedOpen).toMatch(/^NO/);
@@ -88,7 +146,12 @@ describe("finding leads", () => {
     const found = (await listRecords(ctx)).filter((r) => r.origin === "discovery");
     expect(found.map((r) => r.opportunity)).toEqual(["Implementation Specialist"]);
     const india = found.find((r) => r.opportunity === "Implementation Specialist")!;
-    expect(india).toMatchObject({ account: "Acme", sourceBoard: "Lever", location: "Remote - India", sourceVerification: "verified" });
+    expect(india).toMatchObject({
+      account: "Acme",
+      sourceBoard: "Lever",
+      location: "Remote - India",
+      sourceVerification: "verified",
+    });
     expect(india.attributes).toMatchObject({ workplaceType: "remote", employmentType: "Full Time", postedOn: "2026-09-20" });
     expect(india.extra.postingSummary).toBe("About the Implementation Specialist role.");
 
@@ -103,8 +166,17 @@ describe("finding leads", () => {
     expect((await listRecords(ctx, { view: "prospects" })).map((r) => r.opportunity)).toContain("Implementation Specialist");
 
     // The owner's AI rates it: the rating and the why become the lead's own fields.
-    const ready = await reviewFoundJob(ctx, india.id, "yes", { by: "your AI", fit: "strong", why: "Implementation is your core work; remote India." });
-    expect(ready).toMatchObject({ stage: "verify", status: "active", fitTier: "strong", fitRationale: "Implementation is your core work; remote India." });
+    const ready = await reviewFoundJob(ctx, india.id, "yes", {
+      by: "your AI",
+      fit: "strong",
+      why: "Implementation is your core work; remote India.",
+    });
+    expect(ready).toMatchObject({
+      stage: "verify",
+      status: "active",
+      fitTier: "strong",
+      fitRationale: "Implementation is your core work; remote India.",
+    });
     expect(ready.verifyReason).toMatch(/^Sorted by your AI: /);
 
     // Running again adds nothing twice (even archived jobs aren't re-added).
@@ -115,7 +187,8 @@ describe("finding leads", () => {
 
   it("changes nothing when a board can't be read", async () => {
     const ctx = await testCtx();
-    const r = (await upsertLead(ctx, { account: "Acme", opportunity: "X", sourceUrl: `https://jobs.lever.co/acme/${CLOSED}` })).record;
+    const r = (await upsertLead(ctx, { account: "Acme", opportunity: "X", sourceUrl: `https://jobs.lever.co/acme/${CLOSED}` }))
+      .record;
     const rep = await runDiscovery(ctx, { fetcher: fetcher(false) });
     expect(rep.boardsChecked).toBe(0);
     expect(rep.boardsFailed).toHaveLength(1);
@@ -126,11 +199,23 @@ describe("finding leads", () => {
     const ctx = await testCtx();
     await seedDiscoveryRules(ctx);
     // Saved from LinkedIn — different link, same company and title.
-    await upsertLead(ctx, { account: "Acme Inc.", opportunity: "Implementation  Specialist", sourceUrl: "https://www.linkedin.com/jobs/view/1" });
-    const twice = [...board, { ...board[1], id: "88888888-8888-8888-8888-888888888888", hostedUrl: "https://jobs.lever.co/acme/88888888-8888-8888-8888-888888888888" }];
+    await upsertLead(ctx, {
+      account: "Acme Inc.",
+      opportunity: "Implementation  Specialist",
+      sourceUrl: "https://www.linkedin.com/jobs/view/1",
+    });
+    const twice = [
+      ...board,
+      {
+        ...board[1],
+        id: "88888888-8888-8888-8888-888888888888",
+        hostedUrl: "https://jobs.lever.co/acme/88888888-8888-8888-8888-888888888888",
+      },
+    ];
     await addBoard(ctx, "https://jobs.lever.co/acme");
     const rep = await runDiscovery(ctx, {
-      fetcher: async (url: string) => (url.includes("/v0/postings/acme") ? { status: 200, json: async () => twice } : { status: 404, json: async () => ({}) }),
+      fetcher: async (url: string) =>
+        url.includes("/v0/postings/acme") ? { status: 200, json: async () => twice } : { status: 404, json: async () => ({}) },
     });
     const found = (await listRecords(ctx)).filter((r) => r.origin === "discovery").map((r) => r.opportunity);
     expect(found).toEqual(["Implementation Consultant"]);
@@ -147,18 +232,57 @@ describe("finding leads", () => {
       if (url.startsWith("https://remotive.com/api/remote-jobs"))
         return ok({
           jobs: [
-            { company_name: "Globex Corp", title: "Implementation Specialist", candidate_required_location: "Worldwide", url: "https://remotive.com/remote-jobs/1" },
-            { company_name: "Initech", title: "CRM Automation Consultant", candidate_required_location: "India", url: "https://remotive.com/remote-jobs/2" },
-            { company_name: "Quick Cash Jobs", title: "Implementation Assistant", candidate_required_location: "Worldwide", url: "https://remotive.com/remote-jobs/3", description: "Message us on WhatsApp. Small registration fee required." },
-            { company_name: "Stateside", title: "Implementation Lead", candidate_required_location: "USA", url: "https://remotive.com/remote-jobs/4" },
+            {
+              company_name: "Globex Corp",
+              title: "Implementation Specialist",
+              candidate_required_location: "Worldwide",
+              url: "https://remotive.com/remote-jobs/1",
+            },
+            {
+              company_name: "Initech",
+              title: "CRM Automation Consultant",
+              candidate_required_location: "India",
+              url: "https://remotive.com/remote-jobs/2",
+            },
+            {
+              company_name: "Quick Cash Jobs",
+              title: "Implementation Assistant",
+              candidate_required_location: "Worldwide",
+              url: "https://remotive.com/remote-jobs/3",
+              description: "Message us on WhatsApp. Small registration fee required.",
+            },
+            {
+              company_name: "Stateside",
+              title: "Implementation Lead",
+              candidate_required_location: "USA",
+              url: "https://remotive.com/remote-jobs/4",
+            },
           ],
         });
       if (url.startsWith("https://boards-api.greenhouse.io/v1/boards/globex/jobs"))
         return ok({
           jobs: [
-            { id: 11, title: "Implementation Specialist", absolute_url: "https://job-boards.greenhouse.io/globex/jobs/11", location: { name: "Remote" }, company_name: "Globex" },
-            { id: 12, title: "Onboarding Manager", absolute_url: "https://job-boards.greenhouse.io/globex/jobs/12", location: { name: "Remote - India" }, company_name: "Globex" },
-            { id: 13, title: "Implementation Consultant", absolute_url: "https://job-boards.greenhouse.io/globex/jobs/13", location: { name: "Berlin" }, company_name: "Globex" },
+            {
+              id: 11,
+              title: "Implementation Specialist",
+              absolute_url: "https://job-boards.greenhouse.io/globex/jobs/11",
+              location: { name: "Remote" },
+              company_name: "Globex",
+            },
+            {
+              id: 12,
+              title: "Onboarding Manager",
+              absolute_url: "https://job-boards.greenhouse.io/globex/jobs/12",
+              location: { name: "Remote - India" },
+              company_name: "Globex",
+            },
+            {
+              id: 13,
+              title: "Implementation Consultant",
+              absolute_url: "https://job-boards.greenhouse.io/globex/jobs/13",
+              location: { name: "Berlin" },
+              company_name: "Globex",
+            },
           ],
         });
       return { status: 404, json: async () => ({}) };
@@ -173,7 +297,9 @@ describe("finding leads", () => {
     expect(found.map((r) => r.opportunity).sort()).toEqual(["Implementation Specialist", "Onboarding Manager"]);
     for (const r of found) {
       expect(r.sourceUrl).toMatch(/^https:\/\/job-boards\.greenhouse\.io\/globex\/jobs\//); // the company's page, not the job site
-      expect(r.attributes.genuine).toMatch(/^YES — first seen on Remotive, then found on a Greenhouse careers page under the name "Globex" listing the same job/);
+      expect(r.attributes.genuine).toMatch(
+        /^YES — first seen on Remotive, then found on a Greenhouse careers page under the name "Globex" listing the same job/,
+      );
     }
     expect((await listBoards(ctx)).find((b) => b.company === "Globex")).toMatchObject({ foundVia: "Remotive", enabled: true });
 
@@ -215,12 +341,32 @@ describe("finding leads", () => {
     expect(detectBoard("https://www.linkedin.com/jobs/view/50%-off")).toBeNull();
     await upsertLead(ctx, { account: "Odd", opportunity: "Something", sourceUrl: "https://example.com/jobs/100%-remote" });
     // Saved from the company's own site; the posting lives on its Greenhouse board.
-    const saved = (await upsertLead(ctx, { account: "Globex", opportunity: "Onboarding Manager", sourceUrl: "https://globex.example/careers?gh_jid=12" })).record;
+    const saved = (
+      await upsertLead(ctx, {
+        account: "Globex",
+        opportunity: "Onboarding Manager",
+        sourceUrl: "https://globex.example/careers?gh_jid=12",
+      })
+    ).record;
     await addBoard(ctx, "https://job-boards.greenhouse.io/globex");
     let open = true;
     const gh = async (url: string) =>
       url.startsWith("https://boards-api.greenhouse.io/v1/boards/globex/jobs")
-        ? { status: 200, json: async () => ({ jobs: open ? [{ id: 12, title: "Onboarding Manager", absolute_url: "https://globex.example/careers?gh_jid=12", location: { name: "Remote" } }] : [] }) }
+        ? {
+            status: 200,
+            json: async () => ({
+              jobs: open
+                ? [
+                    {
+                      id: 12,
+                      title: "Onboarding Manager",
+                      absolute_url: "https://globex.example/careers?gh_jid=12",
+                      location: { name: "Remote" },
+                    },
+                  ]
+                : [],
+            }),
+          }
         : { status: 404, json: async () => ({}) };
     await runDiscovery(ctx, { fetcher: gh, sites: false });
     open = false;
@@ -235,10 +381,26 @@ describe("finding leads", () => {
   it("doesn't list jobs at a company you already watch (under another name) as unconfirmed", async () => {
     const ctx = await testCtx();
     await seedDiscoveryRules(ctx);
-    await upsertLead(ctx, { account: "Acme Labs", opportunity: "Ops", sourceUrl: "https://jobs.lever.co/acme/11111111-1111-1111-1111-111111111111" });
+    await upsertLead(ctx, {
+      account: "Acme Labs",
+      opportunity: "Ops",
+      sourceUrl: "https://jobs.lever.co/acme/11111111-1111-1111-1111-111111111111",
+    });
     const f = async (url: string) =>
       url.startsWith("https://remotive.com/")
-        ? { status: 200, json: async () => ({ jobs: [{ company_name: "Acme", title: "Implementation Specialist", candidate_required_location: "Worldwide", url: "https://remotive.com/x" }] }) }
+        ? {
+            status: 200,
+            json: async () => ({
+              jobs: [
+                {
+                  company_name: "Acme",
+                  title: "Implementation Specialist",
+                  candidate_required_location: "Worldwide",
+                  url: "https://remotive.com/x",
+                },
+              ],
+            }),
+          }
         : url.includes("/v0/postings/acme")
           ? { status: 200, json: async () => [] }
           : { status: 404, json: async () => ({}) };
@@ -274,8 +436,11 @@ describe("finding leads", () => {
     const ctx = await testCtx();
     await addBoard(ctx, "https://jobs.lever.co/acme");
     await runDiscovery(ctx, { fetcher: fetcher(), sites: false });
-    const rows = (await ctx.db.execute("select value from source_cache where key like 'board2:%'")) as unknown as { rows?: { value: { postings: { title: string; summary: string | null }[] } }[] };
-    const postings = (rows.rows ?? (rows as unknown as { value: { postings: { title: string; summary: string | null }[] } }[]))[0].value.postings;
+    const rows = (await ctx.db.execute("select value from source_cache where key like 'board2:%'")) as unknown as {
+      rows?: { value: { postings: { title: string; summary: string | null }[] } }[];
+    };
+    const postings = (rows.rows ?? (rows as unknown as { value: { postings: { title: string; summary: string | null }[] } }[]))[0]
+      .value.postings;
     expect(postings.find((p) => p.title === "Account Executive")?.summary).toBeNull();
     expect(postings.find((p) => p.title === "Implementation Specialist")?.summary).toMatch(/Implementation Specialist/);
   });
@@ -324,12 +489,19 @@ describe("Workable job search", () => {
     expect(asked[0]).toContain("workplace=remote");
     expect(asked).toHaveLength(3); // stops politely when asked to slow down
     expect(res.ok && res.listings).toEqual([
-      expect.objectContaining({ company: "Harbour Freight Lines", location: "Remote — India; Philippines", companyHint: "harbourfreight" }),
+      expect.objectContaining({
+        company: "Harbour Freight Lines",
+        location: "Remote — India; Philippines",
+        companyHint: "harbourfreight",
+      }),
     ]);
   });
 
   it("looks on the company's Workable page first for jobs found there", () => {
-    expect(candidateBoards("Harbour Freight Lines", ["harbourfreight"], { workable: true })[0]).toEqual({ provider: "workable", slug: "harbourfreight" });
+    expect(candidateBoards("Harbour Freight Lines", ["harbourfreight"], { workable: true })[0]).toEqual({
+      provider: "workable",
+      slug: "harbourfreight",
+    });
     expect(candidateBoards("Harbour Freight Lines").some((b) => b.provider === "workable")).toBe(false);
   });
 });
@@ -341,7 +513,10 @@ describe("Himalayas slowing down", () => {
       n++;
       if (n > 2) return { status: 429, json: async () => ({}) };
       const q = new URL(url).searchParams.get("q");
-      return { status: 200, json: async () => ({ jobs: [{ companyName: "Acme", title: `${q} lead`, applicationLink: `https://acme.example/${q}` }] }) };
+      return {
+        status: 200,
+        json: async () => ({ jobs: [{ companyName: "Acme", title: `${q} lead`, applicationLink: `https://acme.example/${q}` }] }),
+      };
     };
     const res = await fetchSite("himalayas", { searchWords: ["a", "b", "c", "d"] }, fetcher);
     expect(res.ok && res.listings.length).toBe(2);
@@ -369,14 +544,25 @@ describe("Remote Rocketship and companies' own job pages", () => {
   it("adds a job once its own page on the company's careers system shows it live", async () => {
     const ctx = await testCtx();
     await seedDiscoveryRules(ctx);
-    const page = (title: string) => ({ status: 200, json: async () => ({}), text: async () => `<html><head><meta property="og:title" content="${title}"></head></html>` });
+    const page = (title: string) => ({
+      status: 200,
+      json: async () => ({}),
+      text: async () => `<html><head><meta property="og:title" content="${title}"></head></html>`,
+    });
     const rr = (jobs: unknown[]) => ({
       status: 200,
       json: async () => ({}),
-      text: async () => `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { initialJobOpenings: jobs } } })}</script>`,
+      text: async () =>
+        `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { initialJobOpenings: jobs } } })}</script>`,
     });
     const job = (n: number, title: string, url: string, company: string) => ({
-      roleTitle: title, url, locationType: "remote", location: "India", slug: `job-${n}`, created_at: "2026-09-30T00:00:00Z", company: { name: company, slug: company.toLowerCase() },
+      roleTitle: title,
+      url,
+      locationType: "remote",
+      location: "India",
+      slug: `job-${n}`,
+      created_at: "2026-09-30T00:00:00Z",
+      company: { name: company, slug: company.toLowerCase() },
     });
     const fetcher = async (url: string) => {
       if (url.startsWith("https://www.remoterocketship.com/country/india/jobs/implementation"))
@@ -392,7 +578,12 @@ describe("Remote Rocketship and companies' own job pages", () => {
     const rep = await runDiscovery(ctx, { fetcher, today: "2026-09-30" });
     expect(rep).toMatchObject({ newLeads: 1, pagesConfirmed: 1 });
     const [r] = (await listRecords(ctx)).filter((x) => x.origin === "discovery");
-    expect(r).toMatchObject({ account: "Harbour Freight", opportunity: "Implementation Manager", sourceUrl: "https://harbourfreight.bamboohr.com/careers/12", sourceVerification: "verified" });
+    expect(r).toMatchObject({
+      account: "Harbour Freight",
+      opportunity: "Implementation Manager",
+      sourceUrl: "https://harbourfreight.bamboohr.com/careers/12",
+      sourceVerification: "verified",
+    });
     expect(r.attributes.genuine).toMatch(/own careers page \(BambooHR\)/);
     expect(rep.notConfirmed?.map((n) => n.company).sort()).toEqual(["Gizmo Ltd", "Other Corp"]);
   });
@@ -434,9 +625,15 @@ describe("Who can apply (read from the whole posting)", () => {
     ])
       expect(workRestriction(text), text).toBeNull();
     // A US work-permit question on a job that names India is a company-wide form question; a plain limit still counts.
-    expect(whoCanApply({ location: "Remote - India", summary: "Are you legally authorized to work in the United States?" }, s)).toBeNull();
-    expect(whoCanApply({ location: "Remote", summary: "Are you legally authorized to work in the United States?" }, s)).not.toBeNull();
-    expect(whoCanApply({ location: "Remote - India", summary: "This role is only open to candidates who live in the US." }, s)).not.toBeNull();
+    expect(
+      whoCanApply({ location: "Remote - India", summary: "Are you legally authorized to work in the United States?" }, s),
+    ).toBeNull();
+    expect(
+      whoCanApply({ location: "Remote", summary: "Are you legally authorized to work in the United States?" }, s),
+    ).not.toBeNull();
+    expect(
+      whoCanApply({ location: "Remote - India", summary: "This role is only open to candidates who live in the US." }, s),
+    ).not.toBeNull();
   });
 
   it("keeps out a board job whose full description or application form limits it to the US", async () => {
@@ -446,9 +643,21 @@ describe("Who can apply (read from the whole posting)", () => {
     const ok = (body: unknown) => ({ status: 200, json: async () => body });
     const fetcher = async (url: string) => {
       if (url.endsWith("/v1/boards/acme/jobs"))
-        return ok({ jobs: [1, 2].map((id) => ({ id, title: `Implementation Lead ${id}`, absolute_url: `https://job-boards.greenhouse.io/acme/jobs/${id}`, location: { name: "Remote" } })) });
-      if (url.includes("/jobs/1?questions=true")) return ok({ content: "Fully remote role.", questions: [{ label: "Are you legally authorized to work in the United States?" }] });
-      if (url.includes("/jobs/2?questions=true")) return ok({ content: "Fully remote role, open worldwide.", questions: [{ label: "LinkedIn profile" }] });
+        return ok({
+          jobs: [1, 2].map((id) => ({
+            id,
+            title: `Implementation Lead ${id}`,
+            absolute_url: `https://job-boards.greenhouse.io/acme/jobs/${id}`,
+            location: { name: "Remote" },
+          })),
+        });
+      if (url.includes("/jobs/1?questions=true"))
+        return ok({
+          content: "Fully remote role.",
+          questions: [{ label: "Are you legally authorized to work in the United States?" }],
+        });
+      if (url.includes("/jobs/2?questions=true"))
+        return ok({ content: "Fully remote role, open worldwide.", questions: [{ label: "LinkedIn profile" }] });
       return { status: 404, json: async () => ({}) };
     };
     const rep = await runDiscovery(ctx, { fetcher, today: "2026-10-02", sites: false });
@@ -485,7 +694,9 @@ describe("Who can apply — the wordings that slipped through", () => {
     ])
       expect(workRestriction(t, false, yours), t).toBeNull();
     const s = { regionWords: yours, otherRegionWords: ["United States", "US", "USA", "Europe"] };
-    expect(regionVerdictFor({ title: "Implementation Manager (US only)", location: "Remote" }, s)).toMatch(/^NO — the title says/);
+    expect(regionVerdictFor({ title: "Implementation Manager (US only)", location: "Remote" }, s)).toMatch(
+      /^NO — the title says/,
+    );
     expect(regionVerdictFor({ title: "US & India Implementation Manager", location: "Remote - India" }, s)).toMatch(/^YES/);
     expect(recruiterSign("Weekday AI (client undisclosed - staffing placement)", null)).toMatch(/company name/);
     expect(recruiterSign("Jobgether", "This position is listed on behalf of a partner company")).toBeNull(); // wording not in the list: no false alarm
@@ -495,9 +706,23 @@ describe("Who can apply — the wordings that slipped through", () => {
 
   it("treats 'not remote' and office words in the description as not remote", async () => {
     const { remoteVerdict } = await import("@/services/discovery");
-    expect(remoteVerdict({ title: "Ops Lead", location: "India", summary: "Remote-friendly company. This role is not remote: you will be in our Pune office." })).toMatch(/^NO/);
-    expect(remoteVerdict({ title: "Ops Lead", location: "India", summary: "We are remote-first. This role is hybrid in Bengaluru." })).toMatch(/^NO/);
-    expect(remoteVerdict({ title: "Ops Lead", location: "India", summary: "This is a fully remote role; you can work from anywhere in India." })).toMatch(/^YES/);
+    expect(
+      remoteVerdict({
+        title: "Ops Lead",
+        location: "India",
+        summary: "Remote-friendly company. This role is not remote: you will be in our Pune office.",
+      }),
+    ).toMatch(/^NO/);
+    expect(
+      remoteVerdict({ title: "Ops Lead", location: "India", summary: "We are remote-first. This role is hybrid in Bengaluru." }),
+    ).toMatch(/^NO/);
+    expect(
+      remoteVerdict({
+        title: "Ops Lead",
+        location: "India",
+        summary: "This is a fully remote role; you can work from anywhere in India.",
+      }),
+    ).toMatch(/^YES/);
   });
 
   it("doesn't add a job it couldn't read, and lists skipped jobs with the reason", async () => {
@@ -509,19 +734,101 @@ describe("Who can apply — the wordings that slipped through", () => {
       if (url.endsWith("/v1/boards/acme/jobs"))
         return ok({
           jobs: [
-            { id: 1, title: "Implementation Lead", absolute_url: "https://job-boards.greenhouse.io/acme/jobs/1", location: { name: "Remote" } },
-            { id: 2, title: "Implementation Manager", absolute_url: "https://job-boards.greenhouse.io/acme/jobs/2", location: { name: "Remote" } },
-            { id: 3, title: "Implementation Specialist (US only)", absolute_url: "https://job-boards.greenhouse.io/acme/jobs/3", location: { name: "Remote" } },
+            {
+              id: 1,
+              title: "Implementation Lead",
+              absolute_url: "https://job-boards.greenhouse.io/acme/jobs/1",
+              location: { name: "Remote" },
+            },
+            {
+              id: 2,
+              title: "Implementation Manager",
+              absolute_url: "https://job-boards.greenhouse.io/acme/jobs/2",
+              location: { name: "Remote" },
+            },
+            {
+              id: 3,
+              title: "Implementation Specialist (US only)",
+              absolute_url: "https://job-boards.greenhouse.io/acme/jobs/3",
+              location: { name: "Remote" },
+            },
           ],
         });
-      if (url.includes("/jobs/2?questions=true")) return ok({ content: "Fully remote. Open to candidates anywhere. We hire in the US only.", questions: [] });
+      if (url.includes("/jobs/2?questions=true"))
+        return ok({ content: "Fully remote. Open to candidates anywhere. We hire in the US only.", questions: [] });
       return { status: 500, json: async () => ({}) }; // job 1's description can't be read
     };
     const rep = await runDiscovery(ctx, { fetcher, today: "2026-10-03", sites: false });
     expect(rep.unread).toBe(1);
     expect(rep.newLeads).toBe(0);
     expect(rep.skippedTotal).toBe(2);
-    expect(rep.skippedJobs?.map((s) => s.title).sort()).toEqual(["Implementation Manager", "Implementation Specialist (US only)"]);
+    expect(rep.skippedJobs?.map((s) => s.title).sort()).toEqual([
+      "Implementation Manager",
+      "Implementation Specialist (US only)",
+    ]);
     expect(rep.skippedJobs?.find((s) => s.title === "Implementation Manager")?.reason).toMatch(/Who can apply/);
+  });
+});
+
+describe("Closed listings and boards that have gone", () => {
+  it("archives a Ready lead whose listing closed, and switches off a board that answers 'not found' twice", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    const ok = (body: unknown) => ({ status: 200, json: async () => body });
+    const lever = (ids: string[]) =>
+      ok(
+        ids.map((id) => ({
+          id,
+          text: "Implementation Specialist",
+          hostedUrl: `https://jobs.lever.co/acme/${id}`,
+          categories: { location: "Remote - India" },
+          workplaceType: "remote",
+          descriptionPlain: "Fully remote role, open worldwide.",
+        })),
+      );
+    let acmeJobs = [OPEN, CLOSED];
+    let globexStatus = 200;
+    const fetcher = async (url: string) => {
+      if (url.includes("lever.co/v0/postings/acme")) return lever(acmeJobs);
+      if (url.includes("lever.co/v0/postings/globex"))
+        return globexStatus === 200 ? lever([OPEN]) : { status: globexStatus, json: async () => ({}) };
+      return { status: 404, json: async () => ({}) };
+    };
+    const lead = (slug: string, id: string) =>
+      upsertLead(
+        ctx,
+        {
+          account: slug === "acme" ? "Acme" : "Globex",
+          opportunity: "Implementation Specialist",
+          sourceUrl: `https://jobs.lever.co/${slug}/${id}`,
+        },
+        "discovery",
+      );
+    const closing = (await lead("acme", CLOSED)).record;
+    const fine = (await lead("acme", OPEN)).record;
+    const onGlobex = (await lead("globex", OPEN)).record;
+    await runDiscovery(ctx, { fetcher, today: "2026-10-01", sites: false });
+    expect((await getRecord(ctx, fine.id)).status).toBe("active");
+
+    // The listing closes: the lead is archived with a plain reason.
+    acmeJobs = [OPEN];
+    await runDiscovery(ctx, { fetcher, today: "2026-10-08", sites: false, maxAgeMs: 0 });
+    expect(await getRecord(ctx, closing.id)).toMatchObject({
+      status: "archived",
+      archiveReason: "No longer listed on Acme's job board (checked 2026-10-08)",
+    });
+    expect((await getRecord(ctx, fine.id)).status).toBe("active");
+
+    // Globex's board disappears: one "not found" is tolerated, the second switches it off and holds its leads.
+    globexStatus = 404;
+    const rep1 = await runDiscovery(ctx, { fetcher, today: "2026-10-15", sites: false, maxAgeMs: 0 });
+    expect(rep1.boardsFailed).toEqual([{ company: "Globex", error: "this job board no longer exists at this address" }]);
+    expect(rep1.boardsGone).toEqual([]);
+    const rep2 = await runDiscovery(ctx, { fetcher, today: "2026-10-22", sites: false, maxAgeMs: 0 });
+    expect(rep2.boardsGone).toEqual(["Globex"]);
+    expect((await listBoards(ctx)).find((b) => b.company === "Globex")?.enabled).toBe(false);
+    const held = await getRecord(ctx, onGlobex.id);
+    expect(held.status).toBe("hold");
+    expect(held.attributes.verifiedOpen).toMatch(/^UNKNOWN — Globex's job board no longer exists/);
   });
 });

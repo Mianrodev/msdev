@@ -129,12 +129,19 @@ export const SOURCE_NAMES: Record<string, string> = {
 };
 
 /** Which list a record is on. */
-type ListInput = Pick<RecordRow, "status" | "stage"> & { origin?: string; outreachStatus?: string; attributes?: Record<string, unknown> };
+type ListInput = Pick<RecordRow, "status" | "stage"> & {
+  origin?: string;
+  outreachStatus?: string;
+  attributes?: Record<string, unknown>;
+};
 
 /** You've applied (or applied and then withdrew) — the lead lives on the Applied list. */
 export function applied(r: { outreachStatus?: string; attributes?: Record<string, unknown> }): boolean {
   if (!r.outreachStatus) return false;
-  return APPLIED_OUTREACH.includes(r.outreachStatus as OutreachStatus) || (r.outreachStatus === "closed" && !!r.attributes && "appliedOn" in r.attributes);
+  return (
+    APPLIED_OUTREACH.includes(r.outreachStatus as OutreachStatus) ||
+    (r.outreachStatus === "closed" && !!r.attributes && "appliedOn" in r.attributes)
+  );
 }
 
 export function listOf(r: ListInput): ListKey {
@@ -149,7 +156,8 @@ export function listOf(r: ListInput): ListKey {
 /** One short phrase describing where a record is. */
 export function whereItIs(r: ListInput & Pick<RecordRow, "fitTier">): string {
   const list = listOf(r);
-  if (list === "applied") return r.outreachStatus === "sent_manually" ? "Applied" : `Applied — ${OUTREACH_NAMES[r.outreachStatus ?? ""]}`;
+  if (list === "applied")
+    return r.outreachStatus === "sent_manually" ? "Applied" : `Applied — ${OUTREACH_NAMES[r.outreachStatus ?? ""]}`;
   if (list === "review") return "New — waiting for your review";
   if (list === "ready") return r.fitTier ? `Ready — ${TIER_NAMES[r.fitTier].toLowerCase()}` : "Ready — not yet rated";
   if (list === "checking") {
@@ -179,7 +187,16 @@ export function fmtWhen(s: string | null | undefined): string {
   if (!s) return "—";
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
-  return d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC";
+  return (
+    d.toLocaleString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "UTC",
+    }) + " UTC"
+  );
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -209,7 +226,11 @@ export function describeRun(s: RunSummary): string[] {
     lines.push("Nothing needed to move.");
   }
   const tiers = Object.entries(s.activeProspectsByTier)
-    .sort(([a], [b]) => ["exceptional", "strong", "good", "stretch", "untiered"].indexOf(a) - ["exceptional", "strong", "good", "stretch", "untiered"].indexOf(b))
+    .sort(
+      ([a], [b]) =>
+        ["exceptional", "strong", "good", "stretch", "untiered"].indexOf(a) -
+        ["exceptional", "strong", "good", "stretch", "untiered"].indexOf(b),
+    )
     .map(([k, v]) => `${v} ${k === "untiered" ? "without a fit rating" : (TIER_NAMES[k] ?? k).toLowerCase()}`);
   const total = Object.values(s.activeProspectsByTier).reduce((a, b) => a + b, 0);
   lines.push(total ? `You now have ${plural(total, "Ready lead")}: ${tiers.join(", ")}.` : "You have no Ready leads right now.");
@@ -285,7 +306,10 @@ export function describeSearch(d: DiscoveryReport): string[] {
       ? `Found ${plural(d.newLeads, "new job")} matching your words and rules — they're in New to review.`
       : "No new matching jobs this time.",
   ];
-  if (d.filteredOut) lines.push(`Skipped ${plural(d.filteredOut, "matching job")} that fail a check (not clearly remote, limited to another country, or another region). Find leads lists them, with the reason.`);
+  if (d.filteredOut)
+    lines.push(
+      `Skipped ${plural(d.filteredOut, "matching job")} that fail a check (not clearly remote, limited to another country, or another region). Find leads lists them, with the reason.`,
+    );
   if (d.stillOpen || d.closed) {
     lines.push(`Checked your leads' links: ${d.stillOpen} still open, ${d.closed} no longer listed (closed).`);
   }
@@ -302,9 +326,18 @@ export function describeSearch(d: DiscoveryReport): string[] {
       `${plural(d.pagesConfirmed, "job")} confirmed by opening the job's own page on the company's careers system (Workday, BambooHR, their website…) and added.`,
     );
   if (d.notConfirmedTotal)
-    lines.push(`${plural(d.notConfirmedTotal, "job")} on remote-job sites couldn't be confirmed with the company, so ${d.notConfirmedTotal === 1 ? "it wasn't" : "they weren't"} added (see Find leads to check them yourself).`);
+    lines.push(
+      `${plural(d.notConfirmedTotal, "job")} on remote-job sites couldn't be confirmed with the company, so ${d.notConfirmedTotal === 1 ? "it wasn't" : "they weren't"} added (see Find leads to check them yourself).`,
+    );
   if (d.warningSkipped) lines.push(`Dropped ${plural(d.warningSkipped, "listing")} showing scam warning signs.`);
-  if (d.unread) lines.push(`${plural(d.unread, "matching job")} couldn't be read fully this time, so ${d.unread === 1 ? "it wasn't" : "they weren't"} added yet; the next search tries again.`);
+  if (d.boardsGone?.length)
+    lines.push(
+      `${d.boardsGone.length === 1 ? `${d.boardsGone[0]}'s job board has` : `${d.boardsGone.length} companies' job boards have`} gone, so ${d.boardsGone.length === 1 ? "it was" : "they were"} switched off and ${d.boardsGone.length === 1 ? "its" : "their"} leads put on hold.`,
+    );
+  if (d.unread)
+    lines.push(
+      `${plural(d.unread, "matching job")} couldn't be read fully this time, so ${d.unread === 1 ? "it wasn't" : "they weren't"} added yet; the next search tries again.`,
+    );
   if (d.capped) lines.push("There were more new jobs than one search adds — the rest will come in next time.");
   if (d.data) {
     const mb = d.data.downloadedKb >= 1024 ? `${(d.data.downloadedKb / 1024).toFixed(1)} MB` : `${d.data.downloadedKb} KB`;

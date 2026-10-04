@@ -58,7 +58,10 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
           {last.timing && (
             <details className="small muted" style={{ margin: ".4rem 0 0" }}>
               <summary>
-                Took {last.timing.total >= 90 ? `about ${Math.round(last.timing.total / 60)} minutes` : `${Math.round(last.timing.total)} seconds`}
+                Took{" "}
+                {last.timing.total >= 90
+                  ? `about ${Math.round(last.timing.total / 60)} minutes`
+                  : `${Math.round(last.timing.total)} seconds`}
               </summary>
               Reading job boards {Math.round(last.timing.boards)}s, remote-job sites {Math.round(last.timing.sites)}s, saving{" "}
               {Math.round(last.timing.saving)}s; database reply time {last.timing.dbMs} ms.
@@ -84,8 +87,8 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
         <details className="card" style={{ marginTop: "1rem" }}>
           <summary>Jobs skipped, and why ({last.skippedTotal})</summary>
           <p className="small muted" style={{ marginTop: ".4rem" }}>
-            These matched your words but failed a check, so they weren&apos;t added. If one looks wrong to you, open it and
-            tell us the wording, so the check can be improved.
+            These matched your words but failed a check, so they weren&apos;t added. If one looks wrong to you, open it and tell
+            us the wording, so the check can be improved.
           </p>
           <div className="table-wrap">
             <table className="small">
@@ -111,7 +114,9 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
               </tbody>
             </table>
           </div>
-          {(last.skippedTotal ?? 0) > last.skippedJobs.length && <p className="small muted">Showing the first {last.skippedJobs.length}.</p>}
+          {(last.skippedTotal ?? 0) > last.skippedJobs.length && (
+            <p className="small muted">Showing the first {last.skippedJobs.length}.</p>
+          )}
         </details>
       )}
 
@@ -120,8 +125,8 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
           <summary>Jobs we couldn&apos;t confirm with the company ({last.notConfirmedTotal})</summary>
           <p className="small muted">
             These match your words, but the app couldn&apos;t find them on the company&apos;s own careers page (the company may
-            use a careers system the app can&apos;t read). They were <strong>not</strong> added. If one interests you, look for
-            it on the company&apos;s own website — if it&apos;s there, it&apos;s genuine: add it with{" "}
+            use a careers system the app can&apos;t read). They were <strong>not</strong> added. If one interests you, look for it
+            on the company&apos;s own website — if it&apos;s there, it&apos;s genuine: add it with{" "}
             <Link href="/records/new">Add a lead by hand</Link>. Never pay a fee or move to WhatsApp/Telegram for a job.
           </p>
           <div className="table-wrap">
@@ -159,8 +164,8 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
       <h2 id="words">What to look for</h2>
       <form action={discoveryWordsAction} className="card stack">
         <p className="muted small" style={{ marginTop: 0 }}>
-          One word or phrase per line. A job is added when its <strong>title</strong> contains any word from the first list
-          and none from the second. Your rules then check the location.
+          One word or phrase per line. A job is added when its <strong>title</strong> contains any word from the first list and
+          none from the second. Your rules then check the location.
         </p>
         <div className="fields">
           <Words name="titleWords" label="Job titles to look for" hint="(e.g. implementation, CRM)" words={settings.titleWords} />
@@ -179,9 +184,9 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
           />
         </div>
         <p className="muted small">
-          Jobs listed as on-site or hybrid, or tied to a place that isn&apos;t yours, are skipped (your Remote-only and
-          region rules — change them under <Link href="/settings#rules">Settings → Your rules</Link>). Only jobs that clearly say they&apos;re
-          remote are added — an office city on its own (&quot;Bengaluru, India&quot;) isn&apos;t enough.
+          Jobs listed as on-site or hybrid, or tied to a place that isn&apos;t yours, are skipped (your Remote-only and region
+          rules — change them under <Link href="/settings#rules">Settings → Your rules</Link>). Only jobs that clearly say
+          they&apos;re remote are added — an office city on its own (&quot;Bengaluru, India&quot;) isn&apos;t enough.
         </p>
         <div>
           <SubmitButton pending="Saving…">Save words</SubmitButton>
@@ -190,10 +195,10 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
 
       <h2>Remote-job sites</h2>
       <p className="muted">
-        Used only to discover companies you don&apos;t watch yet. When a matching job appears on one of these sites, the app
-        looks for the same job on the company&apos;s own careers page. Found → the job is genuine: it&apos;s added and the
-        company is watched from then on. Not found → it isn&apos;t added (listed above for you to check). Listings with scam
-        warning signs — a fee, WhatsApp or Telegram contact, pay in crypto, &quot;no interview&quot; — are always dropped.
+        Used only to discover companies you don&apos;t watch yet. When a matching job appears on one of these sites, the app looks
+        for the same job on the company&apos;s own careers page. Found → the job is genuine: it&apos;s added and the company is
+        watched from then on. Not found → it isn&apos;t added (listed above for you to check). Listings with scam warning signs —
+        a fee, WhatsApp or Telegram contact, pay in crypto, &quot;no interview&quot; — are always dropped.
       </p>
       <div className="card table-wrap" style={{ marginBottom: "1.5rem" }}>
         <table>
@@ -205,7 +210,11 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
                 <tr key={site}>
                   <td>
                     <strong>{SITES[site].name}</strong>
-                    {failedSite && <div className="small" style={{ color: "var(--warn)" }}>Last time: {failedSite.error}</div>}
+                    {failedSite && (
+                      <div className="small" style={{ color: "var(--warn)" }}>
+                        Last time: {failedSite.error}
+                      </div>
+                    )}
                   </td>
                   <td className="small">
                     <Ext href={SITES[site].home} label={SITES[site].home.replace(/^https:\/\/(www\.)?/, "")} />
@@ -226,9 +235,9 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
 
       <h2>Companies being watched ({on})</h2>
       <p className="muted">
-        Every company in your tracker whose careers page runs on Lever, Greenhouse, Ashby, Workable, Recruitee or
-        SmartRecruiters is watched automatically, plus companies found through remote-job sites. Add others by pasting a
-        link to their careers page.
+        Every company in your tracker whose careers page runs on Lever, Greenhouse, Ashby, Workable, Recruitee or SmartRecruiters
+        is watched automatically, plus companies found through remote-job sites. Add others by pasting a link to their careers
+        page.
       </p>
       <form action={addBoardAction} className="inline card" style={{ marginBottom: "1rem" }}>
         <label style={{ flex: "1 1 360px" }}>
@@ -237,6 +246,26 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
         </label>
         <SubmitButton pending="Adding…">Add company</SubmitButton>
       </form>
+      {!!last?.boardsFailed?.length && (
+        <div className="card" style={{ marginBottom: "1rem", borderLeft: "5px solid var(--warn)" }}>
+          <strong>
+            Couldn&apos;t read{" "}
+            {last.boardsFailed.length === 1 ? "one company's job board" : `${last.boardsFailed.length} companies' job boards`}{" "}
+            last time
+          </strong>
+          <ul className="small" style={{ margin: ".3rem 0 0", paddingLeft: "1.2rem" }}>
+            {last.boardsFailed.slice(0, 20).map((f) => (
+              <li key={`${f.company}-${f.error}`}>
+                <strong>{f.company}</strong> — {f.error}
+              </li>
+            ))}
+          </ul>
+          <p className="small muted" style={{ margin: ".4rem 0 0" }}>
+            A board that no longer exists twice in a row is switched off by itself, and its leads go On hold for you to check. The
+            others are tried again next time.
+          </p>
+        </div>
+      )}
       <details className="card">
         <summary>Show all {boards.length} companies</summary>
         <div className="table-wrap">
@@ -255,13 +284,19 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
                 <tr key={b.key}>
                   <td>
                     <strong>{b.company}</strong>
-                    {failed.has(b.company) && <div className="small" style={{ color: "var(--warn)" }}>Last time: {failed.get(b.company)}</div>}
+                    {failed.has(b.company) && (
+                      <div className="small" style={{ color: "var(--warn)" }}>
+                        Last time: {failed.get(b.company)}
+                      </div>
+                    )}
                   </td>
                   <td className="small">
                     {PROVIDER_NAMES[b.ref.provider]} <span className="muted">({b.ref.slug})</span>
                   </td>
                   <td className="small">{b.leads}</td>
-                  <td className="small">{b.addedByHand ? "By you" : b.foundVia ? `Found via ${b.foundVia}` : "From your tracker"}</td>
+                  <td className="small">
+                    {b.addedByHand ? "By you" : b.foundVia ? `Found via ${b.foundVia}` : "From your tracker"}
+                  </td>
                   <td>
                     <form action={toggleBoardAction.bind(null, b.key, !b.enabled)}>
                       <SubmitButton className="small" pending="…">

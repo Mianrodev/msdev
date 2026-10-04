@@ -47,6 +47,15 @@ export interface Posting {
 
 export type BoardResult = { ok: true; company: string | null; postings: Posting[] } | { ok: false; error: string };
 
+/** What a job board's answer means, in plain words. */
+export function boardError(status: number): string {
+  if (status === 404 || status === 410) return "this job board no longer exists at this address";
+  if (status === 429) return "the job board asked us to slow down — tried again next time";
+  if (status >= 500) return "the job board had a problem — tried again next time";
+  return `the job board answered ${status}`;
+}
+export const BOARD_GONE = /no longer exists/;
+
 export const boardKey = (b: BoardRef) => `${b.provider}:${b.region ?? ""}:${b.slug.toLowerCase()}`;
 export const postingKey = (b: BoardRef, postingId: string) => `${boardKey(b)}:${postingId.toLowerCase()}`;
 
@@ -142,11 +151,18 @@ export function candidateBoards(company: string, hints: string[] = [], { workabl
     .split(" ")
     .filter(Boolean);
   if (!words.length) return [];
-  const slugs = [...new Set([...hints.map((h) => h.toLowerCase()).filter((h) => /^[a-z0-9-]{2,60}$/.test(h)), words.join(""), words.join("-")])].slice(0, 3);
+  const slugs = [
+    ...new Set([
+      ...hints.map((h) => h.toLowerCase()).filter((h) => /^[a-z0-9-]{2,60}$/.test(h)),
+      words.join(""),
+      words.join("-"),
+    ]),
+  ].slice(0, 3);
   const out: BoardRef[] = [];
   // A job found on Workable's search is on the company's Workable page, so look there first.
   if (workable) for (const slug of slugs) out.push({ provider: "workable", slug });
-  for (const provider of ["greenhouse", "lever", "ashby", "recruitee"] as const) for (const slug of slugs) out.push({ provider, slug });
+  for (const provider of ["greenhouse", "lever", "ashby", "recruitee"] as const)
+    for (const slug of slugs) out.push({ provider, slug });
   out.push({ provider: "smartrecruiters", slug: words.join("") });
   return out;
 }
@@ -176,7 +192,9 @@ const plain = (html: string | null | undefined, max = 4000): string | null => {
 };
 
 function normWorkplace(v: unknown): Posting["workplace"] {
-  const s = String(v ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  const s = String(v ?? "")
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
   if (s === "remote") return "remote";
   if (s === "hybrid") return "hybrid";
   if (s === "onsite" || s === "inoffice" || s === "office") return "onsite";
@@ -202,7 +220,10 @@ export function countingFetcher(inner?: Fetcher): { fetcher: Fetcher; bytes: () 
       return r;
     }
     const res = await fetch(url, {
-      headers: { accept: "application/json, application/rss+xml;q=0.9", "user-agent": "ProspectCRM/1.0 (reads public job listings)" },
+      headers: {
+        accept: "application/json, application/rss+xml;q=0.9",
+        "user-agent": "ProspectCRM/1.0 (reads public job listings)",
+      },
       signal: AbortSignal.timeout(15_000),
       cache: "no-store",
     });
@@ -233,7 +254,14 @@ export async function fetchPostingSummary(
       const res = await fetcher(`${base}/v1/boards/${slug}/jobs/${id}?questions=true`);
       if (res.status !== 200) return null;
       const r = (await res.json()) as { content?: string; questions?: { label?: string }[] };
-      const html = typeof r.content === "string" ? r.content.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&") : null;
+      const html =
+        typeof r.content === "string"
+          ? r.content
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&quot;/g, '"')
+              .replace(/&amp;/g, "&")
+          : null;
       const questions = (r.questions ?? []).map((q) => q.label ?? "").join(". ");
       return { summary: plain(html), onlyFor: workRestriction(`${plain(html, FULL) ?? ""}\n${questions}`) };
     }
@@ -242,7 +270,14 @@ export async function fetchPostingSummary(
       if (res.status !== 200) return null;
       const r = (await res.json()) as { jobAd?: { sections?: Record<string, { text?: string }> } };
       const sec = r.jobAd?.sections ?? {};
-      const html = [sec.companyDescription?.text, sec.jobDescription?.text, sec.qualifications?.text, sec.additionalInformation?.text].filter(Boolean).join("<p>");
+      const html = [
+        sec.companyDescription?.text,
+        sec.jobDescription?.text,
+        sec.qualifications?.text,
+        sec.additionalInformation?.text,
+      ]
+        .filter(Boolean)
+        .join("<p>");
       return { summary: plain(html), onlyFor: workRestriction(plain(html, FULL)) };
     }
   } catch {
@@ -262,7 +297,7 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
       case "lever": {
         const base = board.region === "eu" ? "https://api.eu.lever.co" : "https://api.lever.co";
         const res = await fetcher(`${base}/v0/postings/${slug}?mode=json`);
-        if (res.status !== 200) return { ok: false, error: `board answered ${res.status}` };
+        if (res.status !== 200) return { ok: false, error: boardError(res.status) };
         const rows = (await res.json()) as Record<string, unknown>[];
         if (!Array.isArray(rows)) return { ok: false, error: "unexpected response" };
         return {
@@ -275,7 +310,10 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
               id: String(r.id),
               title: String(r.text ?? "").trim(),
               url: String(r.hostedUrl ?? ""),
-              location: (Array.isArray(cat.allLocations) && cat.allLocations.length ? cat.allLocations.join(" / ") : (cat.location as string)) ?? null,
+              location:
+                (Array.isArray(cat.allLocations) && cat.allLocations.length
+                  ? cat.allLocations.join(" / ")
+                  : (cat.location as string)) ?? null,
               workplace: normWorkplace(r.workplaceType),
               employment: (cat.commitment as string) ?? null,
               compensation: sal?.min ? `${sal.currency ?? ""} ${sal.min}–${sal.max ?? ""} ${sal.interval ?? ""}`.trim() : null,
@@ -283,7 +321,13 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
               summary: plain((r.descriptionPlain as string) ?? (r.description as string)),
               onlyFor: workRestriction(
                 plain(
-                  [r.description, ...(Array.isArray(r.lists) ? (r.lists as { text?: string; content?: string }[]).flatMap((l) => [l.text, l.content]) : []), r.additional]
+                  [
+                    r.description,
+                    ...(Array.isArray(r.lists)
+                      ? (r.lists as { text?: string; content?: string }[]).flatMap((l) => [l.text, l.content])
+                      : []),
+                    r.additional,
+                  ]
                     .filter((x): x is string => typeof x === "string")
                     .join("<p>"),
                   FULL,
@@ -297,7 +341,7 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
         const base = board.region === "eu" ? "https://boards-api.eu.greenhouse.io" : "https://boards-api.greenhouse.io";
         // The list without descriptions is ~100x smaller; descriptions are fetched only for jobs being added.
         const res = await fetcher(`${base}/v1/boards/${slug}/jobs`);
-        if (res.status !== 200) return { ok: false, error: `board answered ${res.status}` };
+        if (res.status !== 200) return { ok: false, error: boardError(res.status) };
         const body = (await res.json()) as { jobs?: Record<string, unknown>[] };
         if (!Array.isArray(body.jobs)) return { ok: false, error: "unexpected response" };
         return {
@@ -307,7 +351,14 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
             const loc = ((r.location as { name?: string }) ?? {}).name ?? null;
             // Greenhouse has no workplace field; only an explicit word in the location counts.
             const wp = loc && /\bremote\b/i.test(loc) ? "remote" : loc && /\bhybrid\b/i.test(loc) ? "hybrid" : null;
-            const content = typeof r.content === "string" ? r.content.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&") : null;
+            const content =
+              typeof r.content === "string"
+                ? r.content
+                    .replace(/&lt;/g, "<")
+                    .replace(/&gt;/g, ">")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&amp;/g, "&")
+                : null;
             return {
               id: String(r.id),
               title: String(r.title ?? "").trim(),
@@ -325,7 +376,7 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
       }
       case "ashby": {
         const res = await fetcher(`https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`);
-        if (res.status !== 200) return { ok: false, error: `board answered ${res.status}` };
+        if (res.status !== 200) return { ok: false, error: boardError(res.status) };
         const body = (await res.json()) as { jobs?: Record<string, unknown>[] };
         if (!Array.isArray(body.jobs)) return { ok: false, error: "unexpected response" };
         return {
@@ -334,7 +385,9 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
           postings: body.jobs
             .filter((r) => r.isListed !== false)
             .map((r) => {
-              const sec = Array.isArray(r.secondaryLocations) ? (r.secondaryLocations as { location?: string }[]).map((s) => s.location).filter(Boolean) : [];
+              const sec = Array.isArray(r.secondaryLocations)
+                ? (r.secondaryLocations as { location?: string }[]).map((s) => s.location).filter(Boolean)
+                : [];
               const comp = (r.compensation as { compensationTierSummary?: string } | undefined)?.compensationTierSummary ?? null;
               return {
                 id: String(r.id),
@@ -353,7 +406,7 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
       }
       case "recruitee": {
         const res = await fetcher(`https://${slug}.recruitee.com/api/offers/`);
-        if (res.status !== 200) return { ok: false, error: `board answered ${res.status}` };
+        if (res.status !== 200) return { ok: false, error: boardError(res.status) };
         const body = (await res.json()) as { offers?: Record<string, unknown>[] };
         if (!Array.isArray(body.offers)) return { ok: false, error: "unexpected response" };
         return {
@@ -371,7 +424,9 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
               compensation: null,
               postedAt: iso(typeof r.published_at === "string" ? r.published_at.replace(" UTC", "Z").replace(" ", "T") : null),
               summary: plain(r.description as string),
-              onlyFor: workRestriction(plain([r.description, r.requirements].filter((x) => typeof x === "string").join("<p>"), FULL)),
+              onlyFor: workRestriction(
+                plain([r.description, r.requirements].filter((x) => typeof x === "string").join("<p>"), FULL),
+              ),
             })),
         };
       }
@@ -380,7 +435,7 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
         let company: string | null = null;
         for (let offset = 0; offset < 1000; offset += 100) {
           const res = await fetcher(`https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=100&offset=${offset}`);
-          if (res.status !== 200) return { ok: false, error: `board answered ${res.status}` };
+          if (res.status !== 200) return { ok: false, error: boardError(res.status) };
           const body = (await res.json()) as { totalFound?: number; content?: Record<string, unknown>[] };
           if (!Array.isArray(body.content)) return { ok: false, error: "unexpected response" };
           for (const r of body.content) {
@@ -405,7 +460,7 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
       }
       case "workable": {
         const res = await fetcher(`https://apply.workable.com/api/v1/widget/accounts/${slug}`);
-        if (res.status !== 200) return { ok: false, error: res.status === 429 ? "board is busy (rate limited) — will retry next time" : `board answered ${res.status}` };
+        if (res.status !== 200) return { ok: false, error: boardError(res.status) };
         const body = (await res.json()) as { name?: string; jobs?: Record<string, unknown>[] };
         if (!Array.isArray(body.jobs)) return { ok: false, error: "unexpected response" };
         return {
@@ -423,7 +478,9 @@ export async function fetchBoard(board: BoardRef, fetcher: Fetcher = defaultFetc
               compensation: null,
               postedAt: iso(r.published_on ?? r.created_at),
               summary: plain(r.description as string),
-              onlyFor: workRestriction(plain([r.description, r.requirements, r.benefits].filter((x) => typeof x === "string").join("<p>"), FULL)),
+              onlyFor: workRestriction(
+                plain([r.description, r.requirements, r.benefits].filter((x) => typeof x === "string").join("<p>"), FULL),
+              ),
             };
           }),
         };
