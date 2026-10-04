@@ -628,7 +628,7 @@ export function regionVerdict(location: string | null, mine: string[], others: s
   place = place
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .replace(
-      /\b(only|first|friendly|flexible|fully|full|100|completely|any|anytime|location|locations|timezone|time|zones?|based|work|from|home|team|company|wide|or|and|in|the|position|role|options?|opportunity)\b/gi,
+      /\b(only|first|friendly|flexible|fully|full|100|completely|any|anytime|location|locations|timezone|time|zones?|based|work|from|home|team|company|wide|or|and|in|the|position|role|options?|opportunity|jobs?|openings?|hiring|eligible|available|ok|okay|possible|allowed|preferred)\b/gi,
       " ",
     )
     .trim();
@@ -816,9 +816,15 @@ export async function runDiscovery(
   const rejected = { ...(await getSetting<Record<string, { at: string; reason: string }>>(ctx, K.rejected, {})) };
   for (const [k, v] of Object.entries(rejected)) if (Date.parse(today) - Date.parse(v.at) > REMEMBER_MS) delete rejected[k];
   const rejectedBefore = (key: string) => key in rejected;
+  // `"Open to your region" is "NO — listing is for Remote US" — starts with "NO"` → `Listing is for Remote US`.
+  const plainReason = (reason: string) => {
+    const m = /^"[^"]+" is "(?:YES|NO|UNKNOWN)\s*—\s*(.*)" — starts with "NO"$/.exec(reason.trim());
+    const t = m ? m[1] : reason;
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  };
   const skip = (company: string, title: string, url: string, location: string | null, reason: string, key = url) => {
     report.skippedTotal!++;
-    const why = reason.replace(/\s+/g, " ").slice(0, 300);
+    const why = plainReason(reason).replace(/\s+/g, " ").slice(0, 300);
     rejected[key] = { at: today, reason: why };
     if (report.skippedJobs!.length < 80) report.skippedJobs!.push({ company, title, url, location, reason: why });
   };
