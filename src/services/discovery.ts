@@ -314,6 +314,11 @@ export function remoteVerdict(p: {
   if (p.workplace === "hybrid") return "NO — the job board marks it hybrid";
   const head = `${p.title}\n${p.location ?? ""}`;
   if (NOT_REMOTE.test(head)) return "NO — the listing says hybrid or office";
+  // A board's "remote" flag isn't trusted on its own when the location is just an office city ("Mumbai, MH").
+  const cityOnly =
+    !!p.location && !REMOTE_WORDS.some((w) => containsTerm(p.location!, w)) && /,|\b(office|hq|headquarters)\b/i.test(p.location);
+  if (p.workplace === "remote" && cityOnly && !SAYS_REMOTE.test(p.summary ?? ""))
+    return `NO — the board says remote but the location is ${p.location} and the description doesn't say remote`;
   if (p.workplace === "remote") return "YES — the job board marks it remote";
   if (REMOTE_WORDS.some((w) => containsTerm(head, w)) || /telecommute|home[- ]based/i.test(head))
     return "YES — the listing says remote";
@@ -374,6 +379,17 @@ export const DISCOVERY_RULES: RuleInput[] = [
       'The whole posting (and the application form) is read for lines like "only open to candidates in the US" or "must be based in the UK". Jobs limited to another country are archived.',
     appliesFrom: "screen",
     field: "whoCanApply",
+    operator: "not_starts_with_any",
+    value: ["NO"],
+    effect: "reject",
+    enabled: true,
+  },
+  {
+    key: "discovery.recent",
+    label: "Posted recently",
+    description: "Jobs posted more than 45 days ago are usually filled or stale, so they are archived.",
+    appliesFrom: "screen",
+    field: "freshness",
     operator: "not_starts_with_any",
     value: ["NO"],
     effect: "reject",
@@ -1278,6 +1294,7 @@ export async function runDiscovery(
       attributes.employer = employerVerdict(l.company, l.summary);
       if (l.location) attributes.postingLocation = l.location;
       if (l.postedAt) attributes.postedOn = l.postedAt;
+      attributes.freshness = freshness(l.postedAt, today);
       const firstLook = evaluate(
         rules,
         { account: l.company, opportunity: l.title, location: l.location, sourceBoard: system, ...attributes },
@@ -1415,6 +1432,7 @@ async function recheckFacts(sys: Ctx, r: RecordRow, ref: BoardRef, p: Posting, s
         ? "UNKNOWN — only the start of the description could be read; check the posting's location requirements"
         : "YES — the full posting doesn't limit who can apply to another country",
     employer: employerVerdict(r.account, job.summary),
+    freshness: freshness(job.postedAt ?? (r.attributes.postedOn as string | undefined), new Date().toISOString().slice(0, 10)),
   };
   const changed = Object.entries(fresh).filter(([k, v]) => String(r.attributes[k] ?? "").split(" — ")[0] !== v.split(" — ")[0]);
   if (!changed.length) return;
@@ -1434,7 +1452,16 @@ const FACT_NAMES: Record<string, string> = {
   remoteCheck: "Really remote",
   whoCanApply: "Who can apply",
   employer: "Posted by the employer",
+  freshness: "Posted recently",
 };
+
+/** YES when posted in the last 45 days, NO when older, UNKNOWN without a date. */
+export function freshness(postedAt: string | null | undefined, today: string): string {
+  if (!postedAt) return "UNKNOWN — no posting date";
+  const days = Math.floor((Date.parse(today) - Date.parse(postedAt)) / 86_400_000);
+  if (Number.isNaN(days)) return "UNKNOWN — no posting date";
+  return days > 45 ? `NO — posted ${days} days ago (${postedAt})` : `YES — posted ${days} days ago`;
+}
 
 function foundJobAttributes(board: BoardRef, company: string, p: Posting, s: DiscoverySettings, today: string, via?: string) {
   const provider = PROVIDER_NAMES[board.provider];
@@ -1451,6 +1478,7 @@ function foundJobAttributes(board: BoardRef, company: string, p: Posting, s: Dis
   if (p.employment) attributes.employmentType = p.employment;
   if (p.compensation) attributes.compensation = p.compensation;
   if (p.postedAt) attributes.postedOn = p.postedAt;
+  attributes.freshness = freshness(p.postedAt, today);
   return attributes;
 }
 
