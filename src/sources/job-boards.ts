@@ -209,6 +209,9 @@ const iso = (v: unknown): string | null => {
 
 export type Fetcher = (url: string) => Promise<{ status: number; json: () => Promise<unknown>; text?: () => Promise<string> }>;
 
+/** The most one answer may be (the biggest real job board list seen is ~16 MB). */
+const MAX_BODY = 40 * 1024 * 1024;
+
 export const defaultFetcher: Fetcher = countingFetcher().fetcher;
 
 /** A fetcher that also adds up how much it downloaded (so each search can say what it used). */
@@ -226,9 +229,15 @@ export function countingFetcher(inner?: Fetcher): { fetcher: Fetcher; bytes: () 
       },
       signal: AbortSignal.timeout(15_000),
       cache: "no-store",
+      redirect: "manual", // a page that moved elsewhere is not followed (its new address could be anywhere)
     });
-    // Read once, count it, then hand it out as JSON or text.
-    const body = res.status === 200 ? await res.text() : (await res.body?.cancel(), "");
+    // Read once (never more than MAX_BODY), count it, then hand it out as JSON or text.
+    const declared = Number(res.headers.get("content-length") ?? 0);
+    if (declared > MAX_BODY) {
+      await res.body?.cancel();
+      return { status: 413, json: async () => ({}), text: async () => "" };
+    }
+    const body = res.status === 200 ? (await res.text()).slice(0, MAX_BODY) : (await res.body?.cancel(), "");
     bytes += body.length;
     return { status: res.status, json: async () => JSON.parse(body) as unknown, text: async () => body };
   };

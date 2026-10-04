@@ -2,7 +2,7 @@ import Link from "next/link";
 import { findLeadsAction } from "./actions";
 import { SubmitButton } from "@/components/client";
 import { describeRun, describeSearch, fmtWhen, LISTS, type ListKey } from "@/components/plain";
-import { lastDiscovery } from "@/services/discovery";
+import { lastDiscovery, lastError } from "@/services/discovery";
 import { Flash, PageHeader, type SearchParams } from "@/components/ui";
 import { countsByView } from "@/services/records";
 import { getSession } from "@/services/request";
@@ -62,11 +62,12 @@ const STEPS = {
 export default async function Home({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
   const { ctx, user, viewing } = await getSession();
-  const [setup, counts, runs, search] = await Promise.all([
+  const [setup, counts, runs, search, failure] = await Promise.all([
     getSetupStatus(ctx, viewing ?? user),
     countsByView(ctx),
     listRuns(ctx, 1),
     lastDiscovery(ctx),
+    lastError(ctx),
   ]);
   const lastRun = runs[0];
   const next = setup.steps.find((s) => !s.done)?.key;
@@ -114,6 +115,18 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
         </section>
       )}
 
+      {failure && (
+        <section className="card" style={{ marginBottom: "1.5rem", borderLeft: "5px solid var(--warn)" }}>
+          <strong>
+            {failure.step === "search" ? "The last search didn't finish" : "The last search found jobs but couldn't sort them"} (
+            {fmtWhen(failure.at)})
+          </strong>
+          <p className="muted" style={{ margin: ".3rem 0 0" }}>
+            {failure.message[0].toUpperCase() + failure.message.slice(1)}. Nothing was lost. It&apos;s tried again by itself
+            tomorrow, or press Find new leads below.
+          </p>
+        </section>
+      )}
       {counts.prospects > 0 && (
         <section className="next-box" style={{ marginBottom: "1.5rem" }}>
           <h2>

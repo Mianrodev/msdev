@@ -54,7 +54,6 @@ async function writeSetting(db: Db, key: string, value: unknown) {
 // Read on every check (one quick query), so it's the same on every server.
 async function sessionSecret(db: Db): Promise<string> {
   if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET;
-  if (process.env.APP_PASSWORD) return `crm:${process.env.APP_PASSWORD}`;
   await ensureWorkspace(db);
   await db
     .insert(settings)

@@ -14,7 +14,14 @@ import { getDb } from "@/db/client";
 import { users } from "@/db/schema";
 import { OWNER_ID } from "@/lib/auth";
 import { ensureWorkspace, type Ctx } from "@/services/context";
-import { claimScheduledRun, lastDiscovery, releaseScheduledRun, runDiscovery } from "@/services/discovery";
+import {
+  claimScheduledRun,
+  clearFailure,
+  lastDiscovery,
+  noteFailure,
+  releaseScheduledRun,
+  runDiscovery,
+} from "@/services/discovery";
 import { runUpdate } from "@/services/run-update";
 
 export const dynamic = "force-dynamic";
@@ -24,9 +31,16 @@ export const maxDuration = 300;
 const hoursSinceLast = () => (new Date().getUTCDay() === 1 ? 7 * 24 - 4 : 8 * 24);
 /** Don't start another space after this much of the time allowed. */
 const START_BUDGET_MS = 150_000;
+/** The whole run must finish inside Vercel's limit (300 s), with room to save. */
+const TOTAL_BUDGET_MS = 280_000;
 
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
+  // Hosted: the secret is required (set CRON_SECRET in Vercel → Settings → Environment variables).
+  if (!secret && process.env.VERCEL) {
+    console.error("weekly search: CRON_SECRET is not set, so the scheduler can't be trusted; refusing");
+    return NextResponse.json({ ok: false }, { status: 503 });
+  }
   const allowed = secret
     ? req.headers.get("authorization") === `Bearer ${secret}`
     : /vercel-cron/i.test(req.headers.get("user-agent") ?? "");
@@ -36,7 +50,9 @@ export async function GET(req: NextRequest) {
   const db = await getDb();
   await ensureWorkspace(db);
   const people = await db.select({ id: users.id, workspaceId: users.workspaceId }).from(users).where(eq(users.status, "active"));
-  const spaces = [...new Set([...people].sort((a, b) => (a.id === OWNER_ID ? -1 : b.id === OWNER_ID ? 1 : 0)).map((p) => p.workspaceId))];
+  const spaces = [
+    ...new Set([...people].sort((a, b) => (a.id === OWNER_ID ? -1 : b.id === OWNER_ID ? 1 : 0)).map((p) => p.workspaceId)),
+  ];
   const done: { newLeads: number; closed: number }[] = [];
   let skipped = 0;
   for (const workspaceId of spaces) {
@@ -52,14 +68,27 @@ export async function GET(req: NextRequest) {
       skipped++;
       continue;
     }
+    let search;
     try {
-      const search = await runDiscovery(ctx);
-      await runUpdate(ctx);
-      done.push({ newLeads: search.newLeads, closed: search.closed });
-    } catch {
+      // The time left is shared out: the sites and the company checks get a third of it each, at most 90 s.
+      const remaining = TOTAL_BUDGET_MS - (Date.now() - started);
+      search = await runDiscovery(ctx, {
+        siteBudgetMs: Math.max(20_000, Math.min(90_000, remaining / 3)),
+        sites: remaining > 120_000,
+      });
+    } catch (e) {
       // One space's problem never stops the others; it's tried again on the next daily run.
+      await noteFailure(ctx, "search", e).catch(() => undefined);
       await releaseScheduledRun(ctx).catch(() => undefined);
+      continue;
+    }
+    try {
+      await runUpdate(ctx);
+      await clearFailure(ctx);
+      done.push({ newLeads: search.newLeads, closed: search.closed });
+    } catch (e) {
+      await noteFailure(ctx, "sorting", e).catch(() => undefined);
     }
   }
-  return NextResponse.json({ ok: true, searched: done.length, skipped, newLeads: done.reduce((n, d) => n + d.newLeads, 0) });
+  return NextResponse.json({ ok: true, searched: done.length, skipped });
 }

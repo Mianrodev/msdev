@@ -59,6 +59,8 @@ const K = {
   otherRegionWords: "discovery.otherRegionWords",
   extraBoards: "discovery.extraBoards",
   offBoards: "discovery.offBoards",
+  /** The last time a search or the sorting failed, in plain words (cleared by the next good run). */
+  lastError: "discovery.lastError",
   /** Boards that failed last time, and how many times in a row (a board gone twice is switched off). */
   boardFailures: "discovery.boardFailures",
   offSites: "discovery.offSites",
@@ -1220,7 +1222,7 @@ export async function runDiscovery(
         verifiedOpen: `YES — live on ${l.company}'s own careers page (checked ${today})`,
         openToYourRegion: regionVerdictFor({ title: l.title, location: l.location, workplace: "remote" }, settings),
         foundOn: `${site}, confirmed on the company's own careers page (${system})`,
-        genuine: `YES — first seen on ${site}, then opened on ${l.company}'s own careers page (${system}), which shows the same job`,
+        genuine: `YES — first seen on ${site}, then opened on ${l.company}'s own careers page (${system}), which shows the same job. The company itself isn't verified: check the web address is theirs before you apply`,
         workplaceType: "remote",
         remoteCheck: remoteVerdict({ title: l.title, location: l.location, workplace: "remote", summary: l.summary }),
       };
@@ -1349,8 +1351,8 @@ function foundJobAttributes(board: BoardRef, company: string, p: Posting, s: Dis
     openToYourRegion: regionVerdictFor(p, s),
     foundOn: via ? `${via}, confirmed on the company's ${provider} job board` : `${provider} job board`,
     genuine: via
-      ? `YES — first seen on ${via}, then found on a ${provider} careers page under the name "${company}" listing the same job`
-      : `YES — posted on ${company}'s own careers page (${provider})`,
+      ? `YES — first seen on ${via}, then found on a ${provider} careers page under the name "${company}" listing the same job. The company itself isn't verified: check the web address is theirs before you apply`
+      : `YES — posted on ${company}'s careers page (${provider}). Anyone can open a careers page under a company's name: check the web address is theirs before you apply`,
   };
   if (p.location) attributes.postingLocation = p.location;
   if (p.workplace) attributes.workplaceType = p.workplace;
@@ -1394,6 +1396,31 @@ async function addFoundJob(
 
 export async function lastDiscovery(ctx: Ctx): Promise<DiscoveryReport | null> {
   return getSetting<DiscoveryReport | null>(ctx, K.last, null);
+}
+
+export interface LastError {
+  at: string;
+  /** "search" (nothing was added) or "sorting" (jobs were found but not sorted yet). */
+  step: "search" | "sorting";
+  message: string;
+}
+export async function lastError(ctx: Ctx): Promise<LastError | null> {
+  return getSetting<LastError | null>(ctx, K.lastError, null);
+}
+/** Plain words for what went wrong, never a stack trace. */
+export function problemWords(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/fetch failed|ECONN|ETIMEDOUT|terminated|timeout|aborted/i.test(msg))
+    return "the server or a job site didn't answer in time";
+  if (/database|postgres|neon|connection/i.test(msg)) return "the database didn't answer";
+  return "something unexpected stopped it";
+}
+export async function noteFailure(ctx: Ctx, step: LastError["step"], e: unknown) {
+  console.error(`${step} failed`, ctx.workspaceId, e);
+  await saveInternal(ctx, K.lastError, { at: new Date().toISOString(), step, message: problemWords(e) } satisfies LastError);
+}
+export async function clearFailure(ctx: Ctx) {
+  await saveInternal(ctx, K.lastError, null);
 }
 
 /**

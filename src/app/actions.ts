@@ -20,7 +20,16 @@ import {
 import { runReconciliation } from "@/services/reconcile";
 import { runUpdate } from "@/services/run-update";
 import { describeSearch, humanize, OUTREACH_NAMES, SOURCE_NAMES, whereItIs } from "@/components/plain";
-import { addBoard, reviewFoundJob, runDiscovery, saveDiscoveryWords, setBoardEnabled, setSiteEnabled } from "@/services/discovery";
+import {
+  addBoard,
+  clearFailure,
+  noteFailure,
+  reviewFoundJob,
+  runDiscovery,
+  saveDiscoveryWords,
+  setBoardEnabled,
+  setSiteEnabled,
+} from "@/services/discovery";
 import { saveAnswers, saveProfile } from "@/services/answers";
 import { savePrivacy, PRIVACY_FIELDS, type PrivacyDetails } from "@/services/privacy";
 import { createRule, IDENTITY_TERMS_KEY, setRuleEnabled, setSetting, updateRule } from "@/services/rules";
@@ -41,9 +50,12 @@ function withMessage(path: string, key: "ok" | "error", msg: string) {
 
 /** Turn technical error messages into a plain sentence that says what to do. */
 function friendlyError(msg: string): string {
-  const words = (t: string) => t.replace(/\b([a-z]+[A-Z][A-Za-z]*)\b/g, (m) => `"${humanize(m)}"`).replace(/UNKNOWN/g, "not known");
+  const words = (t: string) =>
+    t.replace(/\b([a-z]+[A-Z][A-Za-z]*)\b/g, (m) => `"${humanize(m)}"`).replace(/UNKNOWN/g, "not known");
   let m: RegExpMatchArray | null;
   if (/A reason is required/i.test(msg)) return "Please type a short reason, then try again.";
+  if (/fetch failed|ECONN|ETIMEDOUT|terminated|timeout|aborted/i.test(msg))
+    return "The server or a job site didn't answer in time. Your leads are safe — try again in a few minutes.";
   if (/requires confirming/i.test(msg)) return "Please tick the box to confirm you did this yourself, then try again.";
   if ((m = msg.match(/Cannot advance: (.*?)(?:\. Correct| — this criterion)/))) {
     return `This lead can't move forward because it fails one of your rules: ${words(m[1])}. Choose a "not a fit" or "hold" option instead, or correct the details.`;
@@ -54,12 +66,16 @@ function friendlyError(msg: string): string {
   if ((m = msg.match(/Cannot restore as a prospect: source is (\w+)/))) {
     return 'It can\'t go back to Ready until the link is checked. Set "Is the link still open?" to "Checked — still open" first.';
   }
-  if ((m = msg.match(/Cannot restore as a prospect: (.*)/))) return `It can't go back to Ready because it fails your rules: ${words(m[1])}.`;
-  if (/already has this account\/opportunity\/URL/i.test(msg)) return "Another lead already has the same company, job title and link. Open that one instead.";
+  if ((m = msg.match(/Cannot restore as a prospect: (.*)/)))
+    return `It can't go back to Ready because it fails your rules: ${words(m[1])}.`;
+  if (/already has this account\/opportunity\/URL/i.test(msg))
+    return "Another lead already has the same company, job title and link. Open that one instead.";
   if (/Another target account/i.test(msg)) return "Another company with the same name and website already exists.";
-  if (/Next decision is|completed every stage/i.test(msg)) return "This lead has moved on since the page loaded. Refresh the page and try again.";
+  if (/Next decision is|completed every stage/i.test(msg))
+    return "This lead has moved on since the page loaded. Refresh the page and try again.";
   if (/restore it to active/i.test(msg)) return 'This lead is on hold or archived. Press "Put it back" first, then decide.';
-  if (/Too small|at least 1 character|Invalid string/i.test(msg)) return "Please fill in the required boxes (marked *) and try again.";
+  if (/Too small|at least 1 character|Invalid string/i.test(msg))
+    return "Please fill in the required boxes (marked *) and try again.";
   if (/not found/i.test(msg)) return "We couldn't find that item. It may have been changed — refresh the page.";
   return `That didn't work: ${words(msg)}`;
 }
@@ -123,7 +139,9 @@ function recordInput(f: FormData): RecordInput {
 export async function createLeadAction(f: FormData) {
   const ctx = await getCtx();
   let id = "";
-  await act("/records/new", async () => {
+  await act(
+    "/records/new",
+    async () => {
       const r = await upsertLead(ctx, recordInput(f));
       id = r.record.id;
       return r.created
@@ -265,7 +283,9 @@ function accountInput(f: FormData) {
 export async function createAccountAction(f: FormData) {
   const ctx = await getCtx();
   let id = "";
-  await act("/accounts/new", async () => {
+  await act(
+    "/accounts/new",
+    async () => {
       const r = await upsertAccount(ctx, accountInput(f));
       id = r.account.id;
       return r.created ? "Target account created" : "Already existed — updated in place";
@@ -276,13 +296,14 @@ export async function createAccountAction(f: FormData) {
 
 export async function updateAccountAction(id: string, f: FormData) {
   const ctx = await getCtx();
-  await act(`/accounts/${id}`, async () => void await updateAccount(ctx, id, accountInput(f), str(f, "reason")));
+  await act(`/accounts/${id}`, async () => void (await updateAccount(ctx, id, accountInput(f), str(f, "reason"))));
 }
 
 export async function accountStatusAction(id: string, f: FormData) {
   const ctx = await getCtx();
-  await act(`/accounts/${id}`, async () =>
-    void await setAccountStatus(ctx, id, str(f, "status") as "tracking" | "hold" | "archived", str(f, "reason")),
+  await act(
+    `/accounts/${id}`,
+    async () => void (await setAccountStatus(ctx, id, str(f, "status") as "tracking" | "hold" | "archived", str(f, "reason"))),
   );
 }
 
@@ -309,7 +330,13 @@ function ruleInput(f: FormData): RuleInput {
   // New rules get a code made from their name; existing rules keep theirs.
   const key =
     str(f, "key").trim() ||
-    `custom.${label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 50) || "check"}_${Date.now().toString(36)}`;
+    `custom.${
+      label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_|_$/g, "")
+        .slice(0, 50) || "check"
+    }_${Date.now().toString(36)}`;
   return {
     key,
     label,
@@ -386,7 +413,9 @@ export async function answersAction(f: FormData) {
       rows.push({ title: String(f.get(`title:${i}`) ?? ""), text: String(f.get(`text:${i}`) ?? "") });
     }
     const n = await saveAnswers(ctx, rows);
-    return n ? `Saved ${n} ${n === 1 ? "answer" : "answers"}. They now show on every Ready lead with a Copy button.` : "Saved. You have no answers yet.";
+    return n
+      ? `Saved ${n} ${n === 1 ? "answer" : "answers"}. They now show on every Ready lead with a Copy button.`
+      : "Saved. You have no answers yet.";
   });
 }
 
@@ -405,10 +434,24 @@ export async function findLeadsAction(f: FormData) {
   const ctx = await getCtx();
   const back = str(f, "back") === "/discover" ? "/discover" : "/";
   await act(back, async () => {
-    const search = await runDiscovery(ctx);
-    await runUpdate(ctx);
+    let search;
+    try {
+      search = await runDiscovery(ctx);
+    } catch (e) {
+      await noteFailure(ctx, "search", e);
+      throw e;
+    }
+    try {
+      await runUpdate(ctx);
+      await clearFailure(ctx);
+    } catch (e) {
+      await noteFailure(ctx, "sorting", e);
+      throw e;
+    }
     return [
-      search.newLeads ? `Search finished — ${search.newLeads} new jobs to review.` : "Search finished — no new matching jobs this time.",
+      search.newLeads
+        ? `Search finished — ${search.newLeads} new jobs found and sorted.`
+        : "Search finished — no new matching jobs this time.",
       ...describeSearch(search).slice(2),
     ].join("\n");
   });
@@ -430,7 +473,12 @@ export async function reviewAction(id: string, f: FormData) {
           ? "Put on hold."
           : "Archived — you won't see this job again.";
     },
-    (msg) => withMessage(nextId ? `/records/${nextId}` : "/records?list=review", "ok", `${msg as string}${nextId ? " Here's the next one." : " That was the last one to review."}`),
+    (msg) =>
+      withMessage(
+        nextId ? `/records/${nextId}` : "/records?list=review",
+        "ok",
+        `${msg as string}${nextId ? " Here's the next one." : " That was the last one to review."}`,
+      ),
   );
 }
 

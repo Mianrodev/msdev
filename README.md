@@ -110,8 +110,9 @@ loaded on every start.
   4. Runs the weekly update below.
 
   It also runs by itself every Monday at 08:00 India time through Vercel Cron
-  (`vercel.json` → `/api/cron/weekly`). Set `CRON_SECRET` in Vercel to lock
-  that address down; without it only Vercel's scheduler may call it.
+  (`vercel.json` → `/api/cron/weekly`). `CRON_SECRET` must be set in Vercel
+  (Settings → Environment variables); the route refuses to run without it when
+  hosted. Locally, Vercel's scheduler user agent is enough.
   LinkedIn and other sites can't be searched this way. Add those leads by hand.
 - **Run update** is the weekly sorting step. It replaces the workbook's
   "Update this week's prospect tracker" trigger. In one transaction it:

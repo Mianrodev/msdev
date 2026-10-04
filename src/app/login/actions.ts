@@ -20,6 +20,7 @@ import {
   resetWithRecoveryCode,
   saveOwnerEmail,
   signIn,
+  sessionUser,
   signOutEverywhere,
   checkOrPretend,
   clearTries,
@@ -42,7 +43,11 @@ async function clientIp(): Promise<string> {
  * Check a password with guessing protection. For an email with no account there's nothing to
  * protect: the same work is done and the same answer given, so nobody can tell which emails exist.
  */
-async function guardedCheck(db: Awaited<ReturnType<typeof getDb>>, who: UserRow | null, password: string): Promise<"ok" | "wrong" | "wait"> {
+async function guardedCheck(
+  db: Awaited<ReturnType<typeof getDb>>,
+  who: UserRow | null,
+  password: string,
+): Promise<"ok" | "wrong" | "wait"> {
   if (!who) {
     await checkOrPretend(null, password);
     return "wrong";
@@ -97,8 +102,12 @@ export async function loginAction(f: FormData) {
   redirect(next);
 }
 
+/** Sign out: the cookie goes, and the session itself stops working everywhere it was used. */
 export async function logoutAction() {
   const jar = await cookies();
+  const db = await getDb();
+  const user = await sessionUser(db, jar.get(SESSION_COOKIE)?.value);
+  if (user) await signOutEverywhere(db, user.id);
   jar.delete(SESSION_COOKIE);
   jar.delete(VIEW_COOKIE);
   redirect("/login");
@@ -115,7 +124,8 @@ export async function changePasswordAction(f: FormData) {
     else {
       await changePassword(ctx.db, user.id, pw);
       await startSession(user); // everyone else is signed out; you stay signed in here
-      msg = "ok=" + q("Password changed. Any other device that was signed in has been signed out, and any AI link was switched off.");
+      msg =
+        "ok=" + q("Password changed. Any other device that was signed in has been signed out, and any AI link was switched off.");
     }
   }
   redirect(`/account?${msg}`);
@@ -125,7 +135,9 @@ export async function ownerEmailAction(f: FormData) {
   const { user, ctx } = await getSession();
   if (user.id !== OWNER_ID) redirect("/account");
   const problem = await saveOwnerEmail(ctx.db, String(f.get("email") ?? ""));
-  redirect(`/account?${problem ? "error=" + q(problem) : "ok=" + q("Saved. You can sign in with this email and your password (or leave the email empty).")}`);
+  redirect(
+    `/account?${problem ? "error=" + q(problem) : "ok=" + q("Saved. You can sign in with this email and your password (or leave the email empty).")}`,
+  );
 }
 
 export async function resetPasswordAction(f: FormData) {
@@ -147,7 +159,10 @@ export async function resetPasswordAction(f: FormData) {
   const user = (await signIn(db, email, pw))!;
   await startSession(user);
   redirect(
-    "/?ok=" + q("New password saved — you're signed in. Your recovery code is now used up, so make a new one (see Getting started below)."),
+    "/?ok=" +
+      q(
+        "New password saved — you're signed in. Your recovery code is now used up, so make a new one (see Getting started below).",
+      ),
   );
 }
 
@@ -190,7 +205,8 @@ export async function makeRecoveryCodeAction(_prev: Made, f: FormData): Promise<
 export async function makeAiLinkAction(_prev: Made, f: FormData): Promise<Made> {
   const { session, error } = await confirmed(f);
   if (error) return { error };
-  if (session.viewing) return { error: "Switch back to your own space first — AI links are made by each person for their own space." };
+  if (session.viewing)
+    return { error: "Switch back to your own space first — AI links are made by each person for their own space." };
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
