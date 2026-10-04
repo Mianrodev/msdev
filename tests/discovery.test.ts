@@ -907,3 +907,14 @@ describe("Being frugal and reading Workday", () => {
     expect(asked.filter((u) => u.includes("/jobs/7")).length).toBe(fetches); // and not downloaded again
   });
 });
+
+describe("Region wording", () => {
+  it("doesn't mistake 'Remote job' or 'Remote – hiring worldwide' for a place", () => {
+    const mine = ["India", "Anywhere", "Worldwide"];
+    const others = ["United States", "US", "Canada"];
+    expect(regionVerdict("Remote job", mine, others, "remote")).toBe("UNKNOWN");
+    expect(regionVerdict("Remote — hiring worldwide", mine, others, "remote")).toMatch(/^YES/);
+    expect(regionVerdict("Remote US", mine, others, "remote")).toMatch(/^NO/);
+    expect(regionVerdict("Remote – Chicago", mine, others, "remote")).toMatch(/^NO — remote, but/);
+  });
+});
