@@ -23,6 +23,7 @@ import {
   runDiscovery,
 } from "@/services/discovery";
 import { runUpdate } from "@/services/run-update";
+import { pruneCache } from "@/services/source-cache";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -49,6 +50,7 @@ export async function GET(req: NextRequest) {
   const started = Date.now();
   const db = await getDb();
   await ensureWorkspace(db);
+  await pruneCache(db).catch((e) => console.error("cache prune failed", e)); // cheap, keeps the free database small
   const people = await db.select({ id: users.id, workspaceId: users.workspaceId }).from(users).where(eq(users.status, "active"));
   const spaces = [
     ...new Set([...people].sort((a, b) => (a.id === OWNER_ID ? -1 : b.id === OWNER_ID ? 1 : 0)).map((p) => p.workspaceId)),

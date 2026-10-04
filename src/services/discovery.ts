@@ -59,6 +59,8 @@ const K = {
   otherRegionWords: "discovery.otherRegionWords",
   extraBoards: "discovery.extraBoards",
   offBoards: "discovery.offBoards",
+  /** Jobs this search already judged and skipped, with when and why, so they aren't re-judged every week. */
+  rejected: "discovery.rejected",
   /** The last time a search or the sorting failed, in plain words (cleared by the next good run). */
   lastError: "discovery.lastError",
   /** Boards that failed last time, and how many times in a row (a board gone twice is switched off). */
@@ -804,10 +806,16 @@ export async function runDiscovery(
   const byPosting = new Map<string, RecordRow[]>();
   // Same company + same job title = the same job, even if you saved it from LinkedIn or another site,
   // or the company posted it once per city.
-  const skip = (company: string, title: string, url: string, location: string | null, reason: string) => {
+  // Skipped jobs are remembered for a month, so a job rejected once isn't downloaded and judged again every week.
+  const REMEMBER_MS = 30 * 86_400_000;
+  const rejected = { ...(await getSetting<Record<string, { at: string; reason: string }>>(ctx, K.rejected, {})) };
+  for (const [k, v] of Object.entries(rejected)) if (Date.parse(today) - Date.parse(v.at) > REMEMBER_MS) delete rejected[k];
+  const rejectedBefore = (key: string) => key in rejected;
+  const skip = (company: string, title: string, url: string, location: string | null, reason: string, key = url) => {
     report.skippedTotal!++;
-    if (report.skippedJobs!.length < 80)
-      report.skippedJobs!.push({ company, title, url, location, reason: reason.replace(/\s+/g, " ").slice(0, 300) });
+    const why = reason.replace(/\s+/g, " ").slice(0, 300);
+    rejected[key] = { at: today, reason: why };
+    if (report.skippedJobs!.length < 80) report.skippedJobs!.push({ company, title, url, location, reason: why });
   };
   // "Acme (client undisclosed)" and "Acme" are one company: notes in brackets are ignored.
   const sameJob = (company: string, title: string) =>
@@ -873,6 +881,10 @@ export async function runDiscovery(
         report.alreadyKnown++;
         continue;
       }
+      if (rejectedBefore(postingKey(ref, p.id))) {
+        report.filteredOut++; // judged and skipped within the last month
+        continue;
+      }
       if (report.newLeads >= maxNew) {
         report.capped = true;
         continue;
@@ -892,13 +904,20 @@ export async function runDiscovery(
       );
       if (firstLook.fails.length) {
         report.filteredOut++;
-        skip(company, p.title, p.url, p.location, firstLook.fails[0].reason);
+        skip(company, p.title, p.url, p.location, firstLook.fails[0].reason, postingKey(ref, p.id));
         continue;
       }
       // Boards whose list leaves descriptions out: fetch this one job's description (one small request).
       let job: Posting = p;
       if (!p.summary || p.onlyFor === undefined) {
-        const got = await fetchPostingSummary(ref, p.id, fetcher);
+        // One job's description is shared for a week, so nobody downloads it twice.
+        const pkey = `posting:${postingKey(ref, p.id)}`;
+        let got =
+          (await readCache<{ summary: string | null; onlyFor: string | null }>(ctx.db, pkey, 7 * 86_400_000))?.value ?? null;
+        if (!got) {
+          got = await fetchPostingSummary(ref, p.id, fetcher);
+          if (got) await writeCache(ctx.db, pkey, got);
+        }
         if (!got && !p.summary) {
           report.unread!++; // nothing to judge by: tried again next search
           continue;
@@ -910,7 +929,7 @@ export async function runDiscovery(
       if (limit) {
         attributes.whoCanApply = `NO — ${limit}`;
         report.filteredOut++;
-        skip(company, p.title, p.url, p.location, `Who can apply: ${limit}`);
+        skip(company, p.title, p.url, p.location, `Who can apply: ${limit}`, postingKey(ref, p.id));
         continue;
       }
       attributes.whoCanApply =
@@ -921,7 +940,14 @@ export async function runDiscovery(
       attributes.remoteCheck = remoteVerdict(job);
       if (/^NO/.test(String(attributes.remoteCheck))) {
         report.filteredOut++;
-        skip(company, p.title, p.url, p.location, `Remote: ${String(attributes.remoteCheck).replace(/^NO — /, "")}`);
+        skip(
+          company,
+          p.title,
+          p.url,
+          p.location,
+          `Remote: ${String(attributes.remoteCheck).replace(/^NO — /, "")}`,
+          postingKey(ref, p.id),
+        );
         continue;
       }
       attributes.employer = employerVerdict(company, job.summary);
@@ -929,7 +955,7 @@ export async function runDiscovery(
       const signs = warningSigns(`${job.title}\n${job.summary ?? ""}`);
       if (signs.length) {
         report.warningSkipped!++;
-        skip(company, p.title, p.url, p.location, `Scam warning sign: ${signs.join(", ")}`);
+        skip(company, p.title, p.url, p.location, `Scam warning sign: ${signs.join(", ")}`, postingKey(ref, p.id));
         continue;
       }
       let created = false;
@@ -995,6 +1021,7 @@ export async function runDiscovery(
     await processBoard(b.ref, b.key, res.company?.trim() || b.company, res.postings);
   }
   await saveInternal(ctx, K.boardFailures, failures);
+  await saveInternal(ctx, K.rejected, rejected);
 
   // 3. Remote-job sites → companies you don't watch yet → confirmed on their own careers board.
   if (opts.sites !== false) {
@@ -1017,7 +1044,7 @@ export async function runDiscovery(
         fetcher,
       );
       // Keep only listings someone could want (their titles match anyone's words).
-      if (res.ok)
+      if (res.ok && !res.partial)
         await writeCache(
           ctx.db,
           key,
@@ -1179,7 +1206,10 @@ export async function runDiscovery(
     // 4. Companies whose careers system can't be read whole (Workday, BambooHR, their own website…):
     //    open the job's own page there. Live with the same title → genuine, and it's added.
     const onCareers = (l: Listing) =>
-      !!l.applyUrl && !!careersSystem(l.applyUrl, l.company) && !knownJobs.has(sameJob(l.company, l.title));
+      !!l.applyUrl &&
+      !!careersSystem(l.applyUrl, l.company) &&
+      !knownJobs.has(sameJob(l.company, l.title)) &&
+      !rejectedBefore(l.applyUrl);
     const tried = await readCacheMany<{ title: string | null }>(
       ctx.db,
       leftover.filter(onCareers).map((l) => `page2:${l.applyUrl}`),

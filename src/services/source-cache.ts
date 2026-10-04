@@ -27,7 +27,12 @@ export async function readCacheMany<T>(db: Db, keys: string[], maxAgeMs: number)
     const rows = await db
       .select()
       .from(sourceCache)
-      .where(sql`${sourceCache.key} in (${sql.join(keys.slice(i, i + 500).map((k) => sql`${k}`), sql`, `)}) and ${sourceCache.fetchedAt} > ${cutoff}`);
+      .where(
+        sql`${sourceCache.key} in (${sql.join(
+          keys.slice(i, i + 500).map((k) => sql`${k}`),
+          sql`, `,
+        )}) and ${sourceCache.fetchedAt} > ${cutoff}`,
+      );
     for (const r of rows) out.set(r.key, r.value as T);
   }
   return out;
@@ -39,4 +44,12 @@ export async function writeCache(db: Db, key: string, value: unknown): Promise<v
     .insert(sourceCache)
     .values({ key, fetchedAt, value })
     .onConflictDoUpdate({ target: sourceCache.key, set: { value, fetchedAt } });
+}
+
+/** Drop what no search reads any more: anything older than 31 days, and copies under retired key names. */
+export async function pruneCache(db: Db): Promise<void> {
+  const cutoff = new Date(Date.now() - 31 * 24 * HOUR).toISOString();
+  await db.execute(
+    sql`delete from ${sourceCache} where ${sourceCache.fetchedAt} < ${cutoff} or ${sourceCache.key} like 'board:%' or ${sourceCache.key} like 'page:%' or ${sourceCache.key} like 'site:%:v2:%'`,
+  );
 }

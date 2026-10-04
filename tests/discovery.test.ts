@@ -452,18 +452,20 @@ describe("Himalayas search", () => {
     const fetcher = async (url: string) => {
       asked.push(url);
       const q = new URL(url).searchParams;
+      const page = q.get("cursor") ?? "first";
       const jobs = Array.from({ length: 20 }, (_, i) => ({
         companyName: "Acme",
-        title: `${q.get("q")} ${q.get("offset")} ${i}`,
-        applicationLink: `https://acme.example/${q.get("q")}/${q.get("offset")}/${i}`,
+        title: `${q.get("q")} ${page} ${i}`,
+        applicationLink: `https://acme.example/${q.get("q")}/${page}/${i}`,
       }));
-      return { status: 200, json: async () => ({ jobs }) };
+      return { status: 200, json: async () => ({ jobs, nextCursor: `after-${page}` }) };
     };
     const words = Array.from({ length: 15 }, (_, i) => `word${i}`);
     const res = await fetchSite("himalayas", { searchWords: words }, fetcher);
     expect(asked).toHaveLength(15 * 5);
     // every word's first page comes before any second page
-    expect(asked.slice(0, 15).every((u) => u.includes("offset=0"))).toBe(true);
+    expect(asked.slice(0, 15).every((u) => !u.includes("cursor="))).toBe(true);
+    expect(asked[15]).toContain("cursor=after-first");
     expect(res.ok && res.listings.some((l) => l.title.startsWith("word14 "))).toBe(true);
   });
 });
@@ -841,5 +843,67 @@ describe("Tidy data", () => {
     expect(isUnknown("Bengaluru, India")).toBe(false);
     expect(normalizeText("Weekday AI (client undisclosed - staffing placement)")).toBe(normalizeText("Weekday AI"));
     expect(normalizeText("Acme Technologies Pvt. Ltd.")).toBe("acme technologies");
+  });
+});
+
+describe("Being frugal and reading Workday", () => {
+  it("reads a Workday job through its JSON twin", async () => {
+    const { postingPageTitle } = await import("@/sources/job-sites");
+    const asked: string[] = [];
+    const fetcher = async (url: string) => {
+      asked.push(url);
+      return {
+        status: 200,
+        json: async () => ({
+          jobPostingInfo: {
+            title: "Project Manager, PMO Operations",
+            jobDescription: "<p>Fully remote. Must be based in the United States.</p>",
+            location: "Hyderabad, India",
+          },
+        }),
+        text: async () => "",
+      };
+    };
+    const got = await postingPageTitle(
+      "https://astreya.wd5.myworkdayjobs.com/en-US/life-at-astreya/job/hyderabad-india/project-manager_r0017274",
+      fetcher,
+    );
+    expect(asked[0]).toBe(
+      "https://astreya.wd5.myworkdayjobs.com/wday/cxs/astreya/life-at-astreya/job/hyderabad-india/project-manager_r0017274",
+    );
+    expect(got?.title).toBe("Project Manager, PMO Operations");
+    expect(got?.onlyFor).toMatch(/must live in another country/);
+  });
+
+  it("remembers a skipped job for a month instead of downloading and judging it again", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    await addBoard(ctx, "https://job-boards.greenhouse.io/acme");
+    const asked: string[] = [];
+    const ok = (body: unknown) => ({ status: 200, json: async () => body });
+    const fetcher = async (url: string) => {
+      asked.push(url);
+      if (url.endsWith("/v1/boards/acme/jobs"))
+        return ok({
+          jobs: [
+            {
+              id: 7,
+              title: "Implementation Lead",
+              absolute_url: "https://job-boards.greenhouse.io/acme/jobs/7",
+              location: { name: "Remote" },
+            },
+          ],
+        });
+      if (url.includes("/jobs/7?questions=true"))
+        return ok({ content: "Fully remote. Only open to candidates in the US.", questions: [] });
+      return { status: 404, json: async () => ({}) };
+    };
+    const rep1 = await runDiscovery(ctx, { fetcher, today: "2026-10-03", sites: false });
+    expect(rep1.skippedTotal).toBe(1);
+    const fetches = asked.filter((u) => u.includes("/jobs/7")).length;
+    const rep2 = await runDiscovery(ctx, { fetcher, today: "2026-10-10", sites: false, maxAgeMs: 0 });
+    expect(rep2.filteredOut).toBe(1);
+    expect(rep2.skippedTotal).toBe(0); // not judged again
+    expect(asked.filter((u) => u.includes("/jobs/7")).length).toBe(fetches); // and not downloaded again
   });
 });

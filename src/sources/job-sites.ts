@@ -12,7 +12,15 @@
 import { defaultFetcher, plainText, type Fetcher } from "./job-boards";
 import { workRestriction } from "./restrictions";
 
-export type Site = "remotive" | "himalayas" | "workable" | "remoterocketship" | "jobicy" | "remoteok" | "workingnomads" | "weworkremotely";
+export type Site =
+  | "remotive"
+  | "himalayas"
+  | "workable"
+  | "remoterocketship"
+  | "jobicy"
+  | "remoteok"
+  | "workingnomads"
+  | "weworkremotely";
 
 export const SITES: Record<Site, { name: string; home: string }> = {
   remotive: { name: "Remotive", home: "https://remotive.com" },
@@ -41,7 +49,8 @@ export interface Listing {
   applyUrl?: string;
 }
 
-export type SiteResult = { ok: true; listings: Listing[] } | { ok: false; error: string };
+/** `partial`: the site asked us to slow down or time ran out, so this list is incomplete (not kept as a copy). */
+export type SiteResult = { ok: true; listings: Listing[]; partial?: boolean } | { ok: false; error: string };
 
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const day = (v: unknown): string | null => {
@@ -90,13 +99,19 @@ export async function fetchSite(
         // so running out of time loses the deepest pages, never whole words. Up to 5 pages (100 jobs) a word.
         const out: Listing[] = [];
         const seen = new Set<string>();
-        let open = [...searchWords];
+        let open: { word: string; cursor?: string }[] = searchWords.map((word) => ({ word }));
         let busy = false;
-        for (let offset = 0; offset < 100 && open.length && !busy; offset += 20) {
-          const more: string[] = [];
-          for (const word of open) {
-            if (Date.now() > deadline) break; // keep what's found so far
-            const q = new URLSearchParams({ q: word, offset: String(offset) });
+        let late = false;
+        for (let page = 0; page < 5 && open.length && !busy; page++) {
+          const more: typeof open = [];
+          for (const { word, cursor } of open) {
+            if (Date.now() > deadline) {
+              late = true;
+              break; // keep what's found so far
+            }
+            // Pages follow the site's cursor (its offset parameter is being retired).
+            const q = new URLSearchParams({ q: word });
+            if (cursor) q.set("cursor", cursor);
             if (country) q.set("country", country);
             const res = await fetcher(`https://himalayas.app/jobs/api/search?${q}`);
             if (res.status === 429) {
@@ -107,13 +122,15 @@ export async function fetchSite(
               if (!out.length) throw new Error(`site answered ${res.status}`);
               continue;
             }
-            const d = (await res.json()) as { jobs?: Record<string, unknown>[] };
+            const d = (await res.json()) as { jobs?: Record<string, unknown>[]; nextCursor?: string };
             const jobs = d.jobs ?? [];
             for (const r of jobs) {
               const url = str(r.applicationLink) || str(r.guid);
               if (!url || seen.has(url)) continue;
               seen.add(url);
-              const where = Array.isArray(r.locationRestrictions) ? (r.locationRestrictions as unknown[]).map(String).join(", ") : "";
+              const where = Array.isArray(r.locationRestrictions)
+                ? (r.locationRestrictions as unknown[]).map(String).join(", ")
+                : "";
               out.push({
                 site,
                 company: str(r.companyName),
@@ -125,11 +142,11 @@ export async function fetchSite(
                 companyHint: str(r.companySlug) || undefined,
               });
             }
-            if (jobs.length === 20) more.push(word);
+            if (jobs.length === 20 && d.nextCursor) more.push({ word, cursor: d.nextCursor });
           }
           open = more;
         }
-        return { ok: true, listings: out.filter(listing) };
+        return { ok: true, listings: out.filter(listing), partial: busy || late };
       }
       case "workable": {
         // Remote jobs open to your country for every word (up to 10 pages each, a page at a time as above),
@@ -142,10 +159,14 @@ export async function fetchSite(
           ...(country ? searchWords.slice(0, 12).map((w) => ({ w, where: undefined, token: "" })) : []),
         ];
         let busy = false;
+        let late = false;
         for (let page = 0; page < 10 && open.length && !busy; page++) {
           const more: Search[] = [];
           for (const search of open) {
-            if (Date.now() > deadline) break; // keep what's found so far
+            if (Date.now() > deadline) {
+              late = true;
+              break; // keep what's found so far
+            }
             const q = new URLSearchParams({ query: search.w, workplace: "remote" });
             if (search.where) q.set("location", search.where);
             if (search.token) q.set("pageToken", search.token);
@@ -161,7 +182,9 @@ export async function fetchSite(
               const company = str(co.title);
               const title = str(r.title);
               const key = `${company}|${title}`.toLowerCase();
-              const places = (Array.isArray(r.locations) ? (r.locations as unknown[]).map(String) : []).filter((l) => l && l !== "TELECOMMUTE");
+              const places = (Array.isArray(r.locations) ? (r.locations as unknown[]).map(String) : []).filter(
+                (l) => l && l !== "TELECOMMUTE",
+              );
               const had = found.get(key);
               if (had) {
                 places.forEach((l) => had.places.add(l));
@@ -188,8 +211,11 @@ export async function fetchSite(
           }
           open = more;
         }
-        const listings = [...found.values()].map(({ places, ...l }) => ({ ...l, location: places.size ? `Remote — ${[...places].join("; ")}` : "Remote" }));
-        return { ok: true, listings: listings.filter(listing) };
+        const listings = [...found.values()].map(({ places, ...l }) => ({
+          ...l,
+          location: places.size ? `Remote — ${[...places].join("; ")}` : "Remote",
+        }));
+        return { ok: true, listings: listings.filter(listing), partial: busy || late };
       }
       case "remoterocketship": {
         // One public page per kind of job, for remote jobs open to your country (20 newest each).
@@ -198,11 +224,29 @@ export async function fetchSite(
         const place = country.toLowerCase().replace(/[^a-z0-9]+/g, "-");
         const out: Listing[] = [];
         const seen = new Set<string>();
-        const slugs = [...new Set(searchWords.map((w) => w.toLowerCase().replace(/&/g, "and").replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")))];
+        const slugs = [
+          ...new Set(
+            searchWords.map((w) =>
+              w
+                .toLowerCase()
+                .replace(/&/g, "and")
+                .replace(/['’]/g, "")
+                .replace(/[^a-z0-9]+/g, "-")
+                .replace(/^-|-$/g, ""),
+            ),
+          ),
+        ];
+        let partial = false;
         for (const slug of slugs.filter((x) => x.length > 2)) {
-          if (Date.now() > deadline) break; // keep what's found so far
+          if (Date.now() > deadline) {
+            partial = true;
+            break; // keep what's found so far
+          }
           const res = await fetcher(`https://www.remoterocketship.com/country/${place}/jobs/${slug}`);
-          if (res.status === 429) break;
+          if (res.status === 429) {
+            partial = true;
+            break;
+          }
           if (res.status !== 200 || !res.text) continue;
           const m = /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/.exec(await res.text());
           if (!m) continue;
@@ -222,15 +266,25 @@ export async function fetchSite(
               company: str(co.name),
               title: str(r.roleTitle),
               location: `Remote — ${str(r.location) || country}`,
-              url: str(co.slug) && str(r.slug) ? `https://www.remoterocketship.com/company/${str(co.slug)}/jobs/${str(r.slug)}` : apply,
+              url:
+                str(co.slug) && str(r.slug)
+                  ? `https://www.remoterocketship.com/company/${str(co.slug)}/jobs/${str(r.slug)}`
+                  : apply,
               postedAt: day(r.created_at),
-              summary: [str(r.twoLineJobDescriptionSummary), str(r.jobDescriptionSummary), str(r.employmentType) === "contract" ? "Contract role." : ""].filter(Boolean).join(" ") || null,
+              summary:
+                [
+                  str(r.twoLineJobDescriptionSummary),
+                  str(r.jobDescriptionSummary),
+                  str(r.employmentType) === "contract" ? "Contract role." : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ") || null,
               companyHint: str(co.slug) || undefined,
               applyUrl: apply,
             });
           }
         }
-        return { ok: true, listings: out.filter(listing) };
+        return { ok: true, listings: out.filter(listing), partial };
       }
       case "jobicy": {
         const out: Listing[] = [];
@@ -316,7 +370,13 @@ export async function fetchSite(
           const m = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(item);
           return m ? m[1].replace(/^<!\[CDATA\[|\]\]>$/g, "").trim() : "";
         };
-        const decode = (t: string) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+        const decode = (t: string) =>
+          t
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&amp;/g, "&");
         const listings = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(([, item]) => {
           // Titles read "Company: Job title".
           const full = decode(tag(item, "title"));
@@ -337,7 +397,10 @@ export async function fetchSite(
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: /abort|timeout/i.test(msg) ? "site took too long to answer" : /answered/.test(msg) ? msg : "couldn't reach the site" };
+    return {
+      ok: false,
+      error: /abort|timeout/i.test(msg) ? "site took too long to answer" : /answered/.test(msg) ? msg : "couldn't reach the site",
+    };
   }
 }
 
@@ -347,17 +410,29 @@ export async function fetchSite(
  * against it ("we will never ask for a fee") don't count.
  */
 const WARNING_SIGNS: [RegExp, string][] = [
-  [/\b(contact|message|reach|text|chat|apply|connect|add|dm)\b[^.!?\n]{0,40}\b(whats\s?app|telegram|wechat)\b/i, "asks you to talk on a messaging app"],
+  [
+    /\b(contact|message|reach|text|chat|apply|connect|add|dm)\b[^.!?\n]{0,40}\b(whats\s?app|telegram|wechat)\b/i,
+    "asks you to talk on a messaging app",
+  ],
   [/\b(whats\s?app|telegram)\s*(:|number|no\.?|at|@|\+)/i, "asks you to talk on a messaging app"],
-  [/\b(registration|training|application|processing|security|starter[- ]kit|onboarding)\s+(fee|deposit|charges?)\b/i, "asks you to pay a fee"],
+  [
+    /\b(registration|training|application|processing|security|starter[- ]kit|onboarding)\s+(fee|deposit|charges?)\b/i,
+    "asks you to pay a fee",
+  ],
   [/\b(pay|send|transfer)\s+(us\s+)?(an?\s+)?(small\s+|one[- ]time\s+|refundable\s+)?(fee|deposit)\b/i, "asks you to pay"],
   [/\b(salary|paid|pay|compensation)\b[^.!?\n]{0,30}\b(crypto(currency)?|bitcoin|usdt)\b/i, "pays in crypto"],
-  [/\bearn\s+(\$|₹|rs\.?\s?)?\d[\d,]*\s*(per|a|\/)\s*(day|hour)\b[^.!?\n]{0,40}\b(from home|easy|no experience)/i, "promises easy money"],
+  [
+    /\bearn\s+(\$|₹|rs\.?\s?)?\d[\d,]*\s*(per|a|\/)\s*(day|hour)\b[^.!?\n]{0,40}\b(from home|easy|no experience)/i,
+    "promises easy money",
+  ],
   [/\b(send|mail)\s+you\s+a\s+(cheque|check)\b|\b(cheque|check)\s+(to|for)\s+(buy|purchas)/i, "sends a cheque to buy equipment"],
 ];
 /** Checked in every sentence: these phrases are the warning sign themselves ("no interview needed"). */
 const ALWAYS: [RegExp, string][] = [
-  [/\b(no interviews?( needed| required)?|hired instantly|instant hire|guaranteed (job|income|placement))\b/i, "promises a job without an interview"],
+  [
+    /\b(no interviews?( needed| required)?|hired instantly|instant hire|guaranteed (job|income|placement))\b/i,
+    "promises a job without an interview",
+  ],
 ];
 const WARNS_AGAINST = /\b(never|not|no|won't|don't|do not|will not|beware|scams?|fraud(ulent)?)\b/i;
 
@@ -407,7 +482,8 @@ export function careersSystem(url: string, company: string): string | null {
     if (u.protocol !== "https:" || u.port || u.username) return null;
     host = u.hostname.toLowerCase();
     // Only ordinary public website names (no IP addresses or internal network names).
-    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(host) || /\.(internal|local|localhost|lan|home|corp)$/.test(host)) return null;
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(host) || /\.(internal|local|localhost|lan|home|corp)$/.test(host))
+      return null;
   } catch {
     return null;
   }
@@ -426,18 +502,51 @@ export function careersSystem(url: string, company: string): string | null {
  * Answers the title the page shows and any "who can apply" limit in its text, or null (gone, moved,
  * or unreadable).
  */
-export async function postingPageTitle(url: string, fetcher: Fetcher = defaultFetcher): Promise<{ title: string; onlyFor: string | null } | null> {
+export async function postingPageTitle(
+  url: string,
+  fetcher: Fetcher = defaultFetcher,
+): Promise<{ title: string; onlyFor: string | null } | null> {
   try {
+    // Workday pages are drawn by a script; the same job is published as JSON next to it.
+    const wd =
+      /^https:\/\/([a-z0-9-]+)\.(wd\d+\.myworkdayjobs\.com|myworkdaysite\.com)\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)\/job\/(.+)$/i.exec(
+        url,
+      );
+    if (wd) {
+      const res = await fetcher(`https://${wd[1]}.${wd[2]}/wday/cxs/${wd[1]}/${wd[3]}/job/${wd[4]}`);
+      if (res.status !== 200) return null;
+      const d = (await res.json()) as { jobPostingInfo?: { title?: string; jobDescription?: string; location?: string } };
+      const info = d.jobPostingInfo;
+      if (!info?.title) return null;
+      const text = plainText(`${info.jobDescription ?? ""}<p>${info.location ?? ""}`, 200_000) ?? "";
+      return { title: info.title, onlyFor: workRestriction(text) };
+    }
     const res = await fetcher(url);
     if (res.status !== 200 || !res.text) return null;
     const page = (await res.text()).slice(0, 600_000);
-    if (/\b(no longer (available|accepting|open)|position (has been )?filled|job (posting )?(is )?(closed|expired)|this job (has )?expired)\b/i.test(page.slice(0, 200_000)))
+    if (
+      /\b(no longer (available|accepting|open)|position (has been )?filled|job (posting )?(is )?(closed|expired)|this job (has )?expired)\b/i.test(
+        page.slice(0, 200_000),
+      )
+    )
       return null;
-    const decode = (t: string) => t.replace(/&amp;/g, "&").replace(/&#39;|&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
-    const og = /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["']/i.exec(page) ?? /<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:title["']/i.exec(page);
+    const decode = (t: string) =>
+      t
+        .replace(/&amp;/g, "&")
+        .replace(/&#39;|&#x27;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .trim();
+    const og =
+      /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["']/i.exec(page) ??
+      /<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:title["']/i.exec(page);
     const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(page);
     const h1 = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(page);
-    const shown = [og?.[1], title?.[1], h1?.[1]?.replace(/<[^>]+>/g, " ")].map((t) => (t ? decode(t) : "")).filter(Boolean).join(" | ");
+    const shown = [og?.[1], title?.[1], h1?.[1]?.replace(/<[^>]+>/g, " ")]
+      .map((t) => (t ? decode(t) : ""))
+      .filter(Boolean)
+      .join(" | ");
     if (!shown) return null;
     const text = decode(page.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ");
     return { title: shown, onlyFor: workRestriction(text) };
