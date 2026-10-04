@@ -55,7 +55,7 @@ function friendlyError(msg: string): string {
     return 'It can\'t go back to Ready until the link is checked. Set "Is the link still open?" to "Checked — still open" first.';
   }
   if ((m = msg.match(/Cannot restore as a prospect: (.*)/))) return `It can't go back to Ready because it fails your rules: ${words(m[1])}.`;
-  if (/already has this account\/opportunity\/URL/i.test(msg)) return "Another lead already has the same company, opportunity and link. Open that one instead.";
+  if (/already has this account\/opportunity\/URL/i.test(msg)) return "Another lead already has the same company, job title and link. Open that one instead.";
   if (/Another target account/i.test(msg)) return "Another company with the same name and website already exists.";
   if (/Next decision is|completed every stage/i.test(msg)) return "This lead has moved on since the page loaded. Refresh the page and try again.";
   if (/restore it to active/i.test(msg)) return 'This lead is on hold or archived. Press "Put it back" first, then decide.';
@@ -127,7 +127,7 @@ export async function createLeadAction(f: FormData) {
       const r = await upsertLead(ctx, recordInput(f));
       id = r.record.id;
       return r.created
-        ? "Lead added. The next weekly check will look at it, or you can decide yourself below."
+        ? "Lead added. Find new leads will check and sort it, or you can decide yourself below."
         : "You already had this lead, so it was updated instead of added twice.";
     },
     (msg) => withMessage(`/records/${id}`, "ok", msg as string),
@@ -327,7 +327,7 @@ export async function createRuleAction(f: FormData) {
   const ctx = await getCtx();
   await act("/settings", async () => {
     await createRule(ctx, ruleInput(f));
-    return "Check added. The next weekly check will use it for every lead.";
+    return "Rule added. The next Find new leads applies it to every lead.";
   });
 }
 
@@ -335,7 +335,7 @@ export async function updateRuleAction(id: string, f: FormData) {
   const ctx = await getCtx();
   await act(`/settings/rules/${id}`, async () => {
     await updateRule(ctx, id, ruleInput(f), str(f, "reason") || "Edited by you");
-    return "Check saved. The next weekly check will use the new version.";
+    return "Rule saved. The next Find new leads uses the new version.";
   });
 }
 

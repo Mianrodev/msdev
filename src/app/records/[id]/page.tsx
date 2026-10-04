@@ -28,7 +28,7 @@ import {
   TIER_NAMES,
 } from "@/components/plain";
 import { AttributeFields, RecordFields } from "@/components/record-fields";
-import { BackLink, Checks, Ext, Flash, StatusPill, type SearchParams } from "@/components/ui";
+import { BackLink, Checks, Ext, FactBadges, Flash, StatusPill, whyItsHere, type SearchParams } from "@/components/ui";
 import { FIT_TIERS, SOURCE_VERIFICATION, VERDICTS } from "@/core/types";
 import { getAnswers } from "@/services/answers";
 import { listHistory } from "@/services/history";
@@ -38,17 +38,27 @@ import { getSession, viewerFor } from "@/services/request";
 export const dynamic = "force-dynamic";
 
 const JOB_FACTS: [string, string][] = [
-  ["genuine", "Is it genuine?"],
-  ["postingLocation", "Location on the listing"],
+  ["remoteCheck", "Really remote?"],
   ["openToYourRegion", "Open to your region?"],
-  ["workplaceType", "Remote / office"],
+  ["whoCanApply", "Who can apply?"],
+  ["verifiedOpen", "Still listed?"],
+  ["employer", "Posted by the employer?"],
+  ["genuine", "Where it was found"],
+  ["postingLocation", "Location on the listing"],
+  ["workplaceType", "Remote / office (as the board marks it)"],
   ["employmentType", "Type"],
   ["compensation", "Pay (as listed)"],
   ["postedOn", "Posted"],
   ["foundOn", "Found on"],
 ];
 
-export default async function LeadPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
+export default async function LeadPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: SearchParams;
+}) {
   const { id } = await params;
   const sp = await searchParams;
   const session = await getSession();
@@ -103,11 +113,34 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           </div>
         </div>
         {link && (
-          <a className="button" href={/^https?:\/\//i.test(link) ? link : `https://${link}`} target="_blank" rel="noreferrer noopener">
+          <a
+            className="button"
+            href={/^https?:\/\//i.test(link) ? link : `https://${link}`}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
             Open the listing ↗
           </a>
         )}
       </div>
+
+      {(r.origin === "discovery" || whyItsHere(r)) && (
+        <section className="card glance" style={{ margin: "1rem 0 0" }}>
+          <div className="row" style={{ alignItems: "center", gap: ".6rem", flexWrap: "wrap" }}>
+            <strong>At a glance:</strong> <FactBadges r={r} all={r.origin === "discovery"} />
+          </div>
+          {whyItsHere(r) && (
+            <p style={{ margin: ".5rem 0 0" }}>
+              <strong>Why it&apos;s here:</strong> {whyItsHere(r)}
+            </p>
+          )}
+          {list === "ready" && !r.fitTier && (
+            <p className="small muted" style={{ margin: ".4rem 0 0" }}>
+              Not yet rated against your profile. Your AI can rate it (Your AI page), or rate it yourself below.
+            </p>
+          )}
+        </section>
+      )}
 
       {/* ---------------- What to do next ---------------- */}
       <section className="next-box" style={{ margin: "1.2rem 0" }}>
@@ -140,8 +173,8 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           <>
             <p>
               {r.outreachStatus === "sent_manually" &&
-                "You've applied. When they get back to you, change \"Your application\" at the top of this page."}
-              {r.outreachStatus === "responded" && "They got back to you. If it's an interview, set it to \"Interviewing\"."}
+                'You\'ve applied. When they get back to you, change "Your application" at the top of this page.'}
+              {r.outreachStatus === "responded" && 'They got back to you. If it\'s an interview, set it to "Interviewing".'}
               {r.outreachStatus === "interviewing" &&
                 "Interviewing — read the job and your prepared material again before each conversation. Note what was discussed in Response notes (Details)."}
               {r.outreachStatus === "offer" && "Congratulations on the offer! Note the details in Response notes (Details)."}
@@ -160,8 +193,8 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
         {list === "review" && (
           <>
             <p>
-              The app found this job on {r.account}&apos;s job board and it passes your rules. Read about it below (or open the
-              listing), then decide:
+              The app found this job but couldn&apos;t sort it by itself — see the badges above for what&apos;s missing. Read
+              about it below (or open the listing), then decide:
             </p>
             <div className="row" style={{ marginTop: ".6rem" }}>
               {(
@@ -188,7 +221,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
         {list === "checking" && pending && (
           <>
             <p>
-              This lead is still being checked. <strong>Easiest:</strong> run the weekly check on the Home page and it will be
+              This lead is still being checked. <strong>Easiest:</strong> press Find new leads on the Home page and it will be
               sorted for you. Or make the decision yourself:
             </p>
             <form action={bind(decideAction)} className="stack" style={{ marginTop: ".6rem" }}>
@@ -198,7 +231,8 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               </div>
               <div className="fields">
                 <label>
-                  Your decision {pending.suggested && <span className="hint">(suggested: {DECISION_NAMES[pending.suggested]})</span>}
+                  Your decision{" "}
+                  {pending.suggested && <span className="hint">(suggested: {DECISION_NAMES[pending.suggested]})</span>}
                   <select name="verdict" defaultValue={pending.suggested}>
                     {VERDICTS[pending.stage].map((v) => (
                       <option key={v} value={v}>
@@ -264,7 +298,25 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             {JOB_FACTS.filter(([k]) => typeof r.attributes[k] === "string").map(([k, label]) => (
               <div key={k} style={{ display: "contents" }}>
                 <dt>{label}</dt>
-                <dd>{k === "postedOn" ? fmtDay(r.attributes[k] as string) : String(r.attributes[k])}</dd>
+                <dd>
+                  {k === "postedOn" ? (
+                    fmtDay(r.attributes[k] as string)
+                  ) : /^(YES|NO|UNKNOWN)\b/.test(String(r.attributes[k])) ? (
+                    <>
+                      <span
+                        className={`badge ${/^YES/.test(String(r.attributes[k])) ? "pass" : /^NO/.test(String(r.attributes[k])) ? "fail" : "unknown"}`}
+                      >
+                        {String(r.attributes[k]).split(/\s+—\s+/)[0]}
+                      </span>{" "}
+                      {String(r.attributes[k])
+                        .split(/\s+—\s+/)
+                        .slice(1)
+                        .join(" — ")}
+                    </>
+                  ) : (
+                    String(r.attributes[k])
+                  )}
+                </dd>
               </div>
             ))}
           </dl>
@@ -274,7 +326,9 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               <div className="package">{r.extra.postingSummary}</div>
             </>
           )}
-          <p className="small muted">Taken word for word from the company&apos;s job board. Open the listing for the full text.</p>
+          <p className="small muted">
+            Taken word for word from the company&apos;s job board. Open the listing for the full text.
+          </p>
         </section>
       )}
 
@@ -388,7 +442,13 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </SubmitButton>
           </form>
           <p className="small" style={{ marginTop: ".6rem" }}>
-            Links: <Ext href={r.sourceUrl} label="listing" /> {r.nextStepUrl && r.nextStepUrl !== r.sourceUrl && <> · <Ext href={r.nextStepUrl} label="apply page" /></>}
+            Links: <Ext href={r.sourceUrl} label="listing" />{" "}
+            {r.nextStepUrl && r.nextStepUrl !== r.sourceUrl && (
+              <>
+                {" "}
+                · <Ext href={r.nextStepUrl} label="apply page" />
+              </>
+            )}
           </p>
         </section>
       </div>

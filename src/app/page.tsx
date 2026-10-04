@@ -23,12 +23,24 @@ const STEPS = {
   },
   words: {
     title: "Choose what jobs to look for",
-    text: "Type the job titles you want (e.g. \"sales operations\"), words to skip, and the places that work for you.",
+    text: 'Type the job titles you want (e.g. "sales operations"), words to skip, and the places that work for you.',
     href: "/discover#words",
     button: "Choose words",
   },
+  profile: {
+    title: "Tell the app about you",
+    text: "The roles you want, deal-breakers, where you can work, your experience. Every job is rated against this.",
+    href: "/about-me",
+    button: "Write About me",
+  },
+  ai: {
+    title: "Connect your AI",
+    text: "Your AI rates the jobs the app finds and writes cover letters. Without it, jobs are filtered but not rated.",
+    href: "/connect",
+    button: "Connect your AI",
+  },
   upload: {
-    title: "Upload your tracker spreadsheet",
+    title: "Upload your tracker spreadsheet (optional)",
     text: "Bring in your existing leads from the Excel file. Nothing in the file is lost.",
     href: "/import",
     button: "Upload spreadsheet",
@@ -41,7 +53,7 @@ const STEPS = {
   },
   weekly: {
     title: "Find your first new leads",
-    text: "Press Find new leads below. It searches company job boards, checks your links and sorts everything.",
+    text: "Press Find new leads below. It searches company job boards, checks every job and sorts them for you.",
     href: "#weekly",
     button: "Go to Find new leads",
   },
@@ -50,15 +62,20 @@ const STEPS = {
 export default async function Home({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
   const { ctx, user, viewing } = await getSession();
-  const [setup, counts, runs, search] = await Promise.all([getSetupStatus(ctx, viewing ?? user), countsByView(ctx), listRuns(ctx, 1), lastDiscovery(ctx)]);
+  const [setup, counts, runs, search] = await Promise.all([
+    getSetupStatus(ctx, viewing ?? user),
+    countsByView(ctx),
+    listRuns(ctx, 1),
+    lastDiscovery(ctx),
+  ]);
   const lastRun = runs[0];
   const next = setup.steps.find((s) => !s.done)?.key;
   const tiles: { list: ListKey; n: number }[] = [
-    { list: "review", n: counts.review },
     { list: "ready", n: counts.prospects },
     { list: "applied", n: counts.applied },
-    { list: "checking", n: counts.leads },
     { list: "hold", n: counts.hold },
+    { list: "review", n: counts.review },
+    ...(counts.leads ? [{ list: "checking" as const, n: counts.leads }] : []),
     { list: "archive", n: counts.archive },
   ];
 
@@ -67,12 +84,14 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       <Flash sp={sp} />
       <PageHeader
         title="Home"
-        intro="The app finds new jobs for you every Monday. Say yes or no to the new ones, apply to your Ready leads yourself, then track each application on your Applied list."
+        intro="Every Monday the app finds remote jobs, checks each one (really remote? open to you? still listed? genuine?) and puts the good ones on Ready. Your job: open Ready, apply, then mark each one Applied."
       />
 
       {!setup.allDone && (
         <section style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ marginTop: ".5rem" }}>Getting started — {setup.steps.filter((s) => s.done).length} of {setup.steps.length} done</h2>
+          <h2 style={{ marginTop: ".5rem" }}>
+            Getting started — {setup.steps.filter((s) => s.done).length} of {setup.steps.length} done
+          </h2>
           <ol className="steps">
             {setup.steps.map((s, i) => {
               const step = STEPS[s.key];
@@ -95,14 +114,30 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
         </section>
       )}
 
-      {counts.review > 0 && (
+      {counts.prospects > 0 && (
         <section className="next-box" style={{ marginBottom: "1.5rem" }}>
           <h2>
-            {counts.review} new {counts.review === 1 ? "job" : "jobs"} to review
+            {counts.prospects} {counts.prospects === 1 ? "job" : "jobs"} ready to apply to
           </h2>
-          <p>The app found these on company job boards and they pass your rules. Open each one and choose Yes, Not sure or No.</p>
-          <Link className="button primary big" href="/records?list=review">
-            Start reviewing →
+          <p>
+            Each one is remote, open to you and still listed — the app checked. Open the top one, copy your answers, apply, then
+            set it to Applied.
+          </p>
+          <Link className="button primary big" href="/records?list=ready">
+            Start applying →
+          </Link>
+        </section>
+      )}
+      {counts.review > 0 && (
+        <section className="card" style={{ marginBottom: "1.5rem" }}>
+          <h2 style={{ marginTop: 0 }}>
+            {counts.review} {counts.review === 1 ? "job needs" : "jobs need"} your call
+          </h2>
+          <p className="muted">
+            The app couldn&apos;t sort these by itself (a fact is missing). Open each one and choose Yes, Not sure or No.
+          </p>
+          <Link className="button" href="/records?list=review">
+            Look at them →
           </Link>
         </section>
       )}
@@ -112,10 +147,10 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
           <div style={{ flex: "1 1 380px" }}>
             <h2 style={{ marginTop: 0 }}>Find new leads</h2>
             <p className="muted">
-              Searches the careers pages of every company you watch (and remote-job sites, for new companies) for jobs
-              matching your words, checks whether your leads&apos; listings are still open, and sorts everything with your
-              rules. Only jobs confirmed on the company&apos;s own careers page are added. It happens by itself every Monday —
-              press the button to do it now. It never applies or contacts anyone.
+              Searches the careers pages of every company you watch (and remote-job sites, for new companies) for jobs matching
+              your words, checks each one — really remote, open to you, who can apply, still listed, posted by the employer — and
+              sorts them: Ready, On hold or Archived, each with the reason. It happens by itself every Monday; press the button to
+              do it now. It never applies or contacts anyone.
             </p>
             <p className="small muted">
               {search ? `Last search: ${fmtWhen(search.finishedAt)}` : "Not searched yet."}{" "}
@@ -124,7 +159,10 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
           </div>
           <form action={findLeadsAction}>
             <input type="hidden" name="back" value="/" />
-            <SubmitButton className="primary big" pending="Searching… (up to 2 minutes)">
+            <SubmitButton
+              className="primary big"
+              pending="Searching… this can take up to 5 minutes. You can leave this page; the result shows here."
+            >
               Find new leads
             </SubmitButton>
           </form>
@@ -146,7 +184,11 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       <h2>Your lists</h2>
       <div className="tiles">
         {tiles.map((t) => (
-          <Link key={t.list} href={`/records?list=${t.list}`} className={`tile ${t.list}${t.list === "review" && t.n > 0 ? " has" : ""}`}>
+          <Link
+            key={t.list}
+            href={`/records?list=${t.list}`}
+            className={`tile ${t.list}${t.list === "review" && t.n > 0 ? " has" : ""}`}
+          >
             <div className="t">{LISTS[t.list].title}</div>
             <div className="n">{t.n}</div>
             <div className="d">{LISTS[t.list].help}</div>
@@ -161,8 +203,12 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
 
       {setup.records === 0 && (
         <p className="note" style={{ marginTop: "1rem" }}>
-          You don&apos;t have any leads yet. <Link href="/import">Upload your spreadsheet</Link> or{" "}
-          <Link href="/records/new">add a lead by hand</Link>.
+          No leads yet. Choose what jobs to look for, then press Find new leads — the app fills this in for you.{" "}
+          {user.role === "owner" && !viewing && (
+            <>
+              Have a spreadsheet? <Link href="/import">Upload it</Link>.
+            </>
+          )}
         </p>
       )}
       <p className="small muted" style={{ marginTop: "1.2rem" }}>

@@ -471,6 +471,7 @@ const SORTABLE = {
   opportunity: records.opportunity,
   stage: records.stage,
   status: records.status,
+  posted: sql`(${records.attributes} ->> 'postedOn')`,
   // Rank, not alphabet: exceptional → strong → good → stretch → unrated.
   tier: sql`case ${records.fitTier} when 'exceptional' then 0 when 'strong' then 1 when 'good' then 2 when 'stretch' then 3 else 4 end`,
 } as const;

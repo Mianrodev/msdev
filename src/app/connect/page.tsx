@@ -15,10 +15,11 @@ const CAN = [
   "Write a tailored cover letter and answers onto a lead (you copy them when applying)",
   "Add notes to a lead, e.g. company research or interview prep",
   "Add jobs it finds elsewhere, e.g. on LinkedIn (they go to Being checked)",
+  "Rate your Ready jobs against your About me (fit + why) and sort them — Ready, On hold or Archived — with a reason on each; you can always move one back",
 ];
 const CANNOT = [
   "Apply, send messages or contact anyone",
-  "Choose Yes / No for you, or mark anything as applied",
+  "Apply, or mark anything as applied — that's yours",
   "Change your rules, words, password or settings",
   "Delete anything (nothing in this app can be deleted)",
 ];
@@ -29,7 +30,10 @@ export default async function ConnectPage({ searchParams }: { searchParams: Sear
   if (viewing)
     return (
       <>
-        <PageHeader title="Your AI" intro={`AI links are made by each person for their own space. ${viewing.name} can make theirs here when signed in; switch back to your own space to manage yours.`} />
+        <PageHeader
+          title="Your AI"
+          intro={`AI links are made by each person for their own space. ${viewing.name} can make theirs here when signed in; switch back to your own space to manage yours.`}
+        />
       </>
     );
   const status = await aiLinkStatus(ctx.db, user.workspaceId);
@@ -50,7 +54,11 @@ export default async function ConnectPage({ searchParams }: { searchParams: Sear
         <AiLinkMaker make={makeAiLinkAction} on={status.on} />
         {status.on && (
           <form action={removeAiLinkAction} style={{ marginTop: ".8rem" }}>
-            <SubmitButton className="small danger" pending="Switching off…" confirm="Switch off your AI's access? It stops working straight away.">
+            <SubmitButton
+              className="small danger"
+              pending="Switching off…"
+              confirm="Switch off your AI's access? It stops working straight away."
+            >
               Switch off AI access
             </SubmitButton>
           </form>
@@ -65,16 +73,16 @@ export default async function ConnectPage({ searchParams }: { searchParams: Sear
             <strong>Connectors</strong>.
           </li>
           <li>
-            Click <strong>Add custom connector</strong>. Name: <em>My job tracker</em>. Paste your private link as the URL.
-            Leave the advanced settings empty. Click <strong>Add</strong>.
+            Click <strong>Add custom connector</strong>. Name: <em>My job tracker</em>. Paste your private link as the URL. Leave
+            the advanced settings empty. Click <strong>Add</strong>.
           </li>
           <li>
-            In a new chat, click the <strong>tools / + button</strong> under the message box and make sure{" "}
-            <em>My job tracker</em> is switched on.
+            In a new chat, click the <strong>tools / + button</strong> under the message box and make sure <em>My job tracker</em>{" "}
+            is switched on.
           </li>
           <li>
-            Try: <em>&quot;Read about my job tracker, then show me my Ready leads.&quot;</em> Claude asks before using a tool
-            the first time — choose <strong>Allow</strong>.
+            Try: <em>&quot;Read about my job tracker, then show me my Ready leads.&quot;</em> Claude asks before using a tool the
+            first time — choose <strong>Allow</strong>.
           </li>
         </ol>
         <p className="small muted">Works with Claude Pro and Max. Custom connectors are free to add.</p>
@@ -83,19 +91,18 @@ export default async function ConnectPage({ searchParams }: { searchParams: Sear
       <details className="card" style={{ marginBottom: "1.5rem" }}>
         <summary>Using ChatGPT instead?</summary>
         <p>
-          ChatGPT can use the same link, but what it can do depends on your ChatGPT plan (as of late 2026 — OpenAI changes
-          this often):
+          ChatGPT can use the same link, but what it can do depends on your ChatGPT plan (as of late 2026 — OpenAI changes this
+          often):
         </p>
         <ul>
           <li>
-            <strong>Business, Enterprise or Edu:</strong> everything above. An admin turns on{" "}
-            <em>Developer mode</em> (Settings → Apps → Advanced settings), then <strong>Apps → Create</strong>: paste your
-            private link as the address, choose <strong>No authentication</strong>, press <strong>Scan tools</strong>, then{" "}
-            <strong>Create</strong>.
+            <strong>Business, Enterprise or Edu:</strong> everything above. An admin turns on <em>Developer mode</em> (Settings →
+            Apps → Advanced settings), then <strong>Apps → Create</strong>: paste your private link as the address, choose{" "}
+            <strong>No authentication</strong>, press <strong>Scan tools</strong>, then <strong>Create</strong>.
           </li>
           <li>
-            <strong>Pro:</strong> read only — it can read your leads and explain them, but can&apos;t save cover letters or
-            notes into the app (copy them in yourself). Same steps, from your own Settings → Apps.
+            <strong>Pro:</strong> read only — it can read your leads and explain them, but can&apos;t save cover letters or notes
+            into the app (copy them in yourself). Same steps, from your own Settings → Apps.
           </li>
           <li>
             <strong>Plus or Free:</strong> custom connections aren&apos;t available.
@@ -128,7 +135,10 @@ export default async function ConnectPage({ searchParams }: { searchParams: Sear
         <ul>
           <li>&quot;Which of my New to review jobs fit me best, and why?&quot;</li>
           <li>&quot;Write a cover letter for my top Ready lead using my saved answers, and save it to the lead.&quot;</li>
-          <li>&quot;Check the jobs the search couldn&apos;t confirm — are any on the company&apos;s own website? Add the real ones.&quot;</li>
+          <li>
+            &quot;Check the jobs the search couldn&apos;t confirm — are any on the company&apos;s own website? Add the real
+            ones.&quot;
+          </li>
           <li>&quot;I have an interview with Stripe on Friday — add prep notes to that lead.&quot;</li>
         </ul>
         <p className="small muted">

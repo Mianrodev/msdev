@@ -53,6 +53,42 @@ export function ListBadge({ list }: { list: keyof typeof LISTS }) {
   return <span className={`badge ${list}`}>{LISTS[list].title}</span>;
 }
 
+/** The facts that decide a found job, as short badges: ✓ YES, ✗ NO, ? not known. Hover shows the full sentence. */
+const FACTS: [string, string][] = [
+  ["remoteCheck", "Remote"],
+  ["openToYourRegion", "Open to you"],
+  ["whoCanApply", "Who can apply"],
+  ["verifiedOpen", "Still listed"],
+  ["employer", "Employer"],
+];
+export function FactBadges({ r, all = false }: { r: Pick<RecordRow, "attributes" | "origin">; all?: boolean }) {
+  const items = FACTS.map(
+    ([k, label]) => [k, label, typeof r.attributes[k] === "string" ? (r.attributes[k] as string) : null] as const,
+  ).filter(([, , v]) => all || v);
+  if (!items.length) return <span className="muted small">Not checked by the app</span>;
+  return (
+    <span className="facts">
+      {items.map(([k, label, v]) => {
+        const state = !v ? "unknown" : /^YES/i.test(v) ? "pass" : /^NO/i.test(v) ? "fail" : "unknown";
+        return (
+          <span key={k} className={`badge fact ${state}`} title={v ?? `${label}: not checked`}>
+            {ICON[state]} {label}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+/** One line saying why a lead is where it is. */
+export function whyItsHere(
+  r: Pick<RecordRow, "fitRationale" | "verifyReason" | "holdReason" | "archiveReason" | "status" | "stage">,
+): string | null {
+  if (r.status === "hold") return r.holdReason;
+  if (r.status === "archived") return r.archiveReason;
+  return r.fitRationale ?? r.verifyReason ?? null;
+}
+
 const ICON = { pass: "✓", fail: "✗", hold: "!", unknown: "?", not_applicable: "·" } as const;
 const OUTCOME_TEXT = {
   pass: "OK",

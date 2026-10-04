@@ -64,7 +64,7 @@ export default async function PrivacyPage({ searchParams }: { searchParams: Sear
         <li>These details are saved only in your private database. They&apos;re never sent anywhere.</li>
       </ul>
       <p className="small muted">
-        Next: go back <Link href="/">Home</Link> and run your weekly check.
+        Next: go back <Link href="/">Home</Link> and press Find new leads.
       </p>
     </>
   );

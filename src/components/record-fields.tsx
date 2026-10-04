@@ -44,7 +44,7 @@ export function RecordFields({ r = {}, compact = false }: { r?: R; compact?: boo
       <p className="muted small">Only fill in what you know. Leave a box empty (or type &quot;unknown&quot;) rather than guessing.</p>
       <div className="fields">
         <Text name="account" label="Company *" r={r} required placeholder="e.g. Acme Corp" />
-        <Text name="opportunity" label="Opportunity *" r={r} required placeholder="e.g. Implementation Specialist" />
+        <Text name="opportunity" label="Job title *" r={r} required placeholder="e.g. Implementation Specialist" />
         <Text name="sourceUrl" label="Link to the listing" r={r} placeholder="https://…" />
         <Text name="nextStepUrl" label="Link to apply (if different)" r={r} />
         <Text name="sourceBoard" label="Where you found it (site)" r={r} />

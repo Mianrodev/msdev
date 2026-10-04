@@ -39,7 +39,7 @@ export default async function RulesPage({ searchParams }: { searchParams: Search
         {user.role === "owner" && (
           <Link className="tile" href="/team">
             <div className="t">Team</div>
-            <div className="d">Invite people to test the app, each in their own private space.</div>
+            <div className="d">Invite someone to run their own job search here, in their own private space.</div>
           </Link>
         )}
         <Link className="tile" href="/discover">
@@ -50,8 +50,9 @@ export default async function RulesPage({ searchParams }: { searchParams: Search
 
       <h2 id="rules">Your rules</h2>
       <p className="muted">
-        The automatic checks the weekly check uses to sort your leads. Change them any time — the next weekly check applies
-        the new rules to every lead, including ones already Ready.
+        Each rule looks at one detail of a job (location, pay, who can apply…). A job that breaks a rule is archived, or put on
+        hold if the rule says so. Change them any time — the next Find new leads applies them to every lead, including ones
+        already Ready.
       </p>
 
       <h2>Automatic checks ({checks.filter((c) => c.enabled).length} switched on)</h2>
@@ -130,7 +131,8 @@ export default async function RulesPage({ searchParams }: { searchParams: Search
       </details>
 
       <p className="small muted" style={{ marginTop: "1.2rem" }}>
-        Looking for the personal-details protection? It&apos;s on the <Link href="/privacy">Privacy</Link> page. Your password and recovery code are on the <Link href="/account">Password</Link> page.
+        Looking for the personal-details protection? It&apos;s on the <Link href="/privacy">Privacy</Link> page. Your password and
+        recovery code are on the <Link href="/account">Password</Link> page.
       </p>
     </>
   );

@@ -4,6 +4,8 @@ import { importBatches, pipelineRuns, records, targetAccounts } from "@/db/schem
 import type { Ctx } from "./context";
 import { getIdentityTerms, getSetting } from "./rules";
 import { hasRecoveryCode } from "@/lib/auth";
+import { aiLinkStatus } from "@/lib/ai-key";
+import { getProfile } from "./answers";
 
 export interface SetupStatus {
   records: number;
@@ -11,7 +13,7 @@ export interface SetupStatus {
   imports: number;
   runs: number;
   identityTerms: number;
-  steps: { key: "password" | "recovery" | "upload" | "words" | "privacy" | "weekly"; done: boolean }[];
+  steps: { key: "password" | "recovery" | "upload" | "words" | "profile" | "ai" | "privacy" | "weekly"; done: boolean }[];
   allDone: boolean;
 }
 
@@ -27,7 +29,7 @@ export async function getSetupStatus(ctx: Ctx, person: { id: string; role: "owne
       .where(eq(table.workspaceId, ctx.workspaceId));
     return row?.n ?? 0;
   };
-  const [recs, accounts, imports, runs, terms, recovery, words] = await Promise.all([
+  const [recs, accounts, imports, runs, terms, recovery, words, profile, ai] = await Promise.all([
     count(records),
     count(targetAccounts),
     count(importBatches),
@@ -35,11 +37,16 @@ export async function getSetupStatus(ctx: Ctx, person: { id: string; role: "owne
     getIdentityTerms(ctx),
     hasRecoveryCode(ctx.db, person.id),
     getSetting<unknown>(ctx, "discovery.titleWords", null),
+    getProfile(ctx),
+    aiLinkStatus(ctx.db, ctx.workspaceId),
   ]);
   const steps: SetupStatus["steps"] = [
     { key: "password", done: true },
     { key: "recovery", done: recovery },
-    person.role === "owner" ? { key: "upload", done: imports > 0 || recs > 0 } : { key: "words", done: words !== null },
+    { key: "words", done: words !== null },
+    { key: "profile", done: profile.trim().length > 0 },
+    { key: "ai", done: ai.on },
+    ...(person.role === "owner" ? [{ key: "upload" as const, done: imports > 0 || recs > 0 }] : []),
     { key: "privacy", done: terms.length > 0 },
     { key: "weekly", done: runs > 0 },
   ];

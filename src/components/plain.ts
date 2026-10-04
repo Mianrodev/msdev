@@ -17,22 +17,22 @@ export const LISTS = {
   review: {
     title: "New to review",
     short: "New to review",
-    help: "Jobs the app found on company job boards that passed your rules. Open each one and choose Yes, Not sure or No.",
+    help: "Jobs the app couldn't sort by itself (a fact is missing). Usually empty. Open each one and choose Yes, Not sure or No.",
   },
   ready: {
     title: "Ready",
     short: "Ready",
-    help: "Checked and qualified. Open one to read its prepared brief and answers, then apply yourself.",
+    help: "Remote, open to you and still listed — the app checked. Apply to these, best fit first, then mark each one Applied.",
   },
   checking: {
     title: "Being checked",
     short: "Being checked",
-    help: "New or part-way through the checks. The weekly check moves these along for you.",
+    help: "Added by hand or by your AI and not yet through the checks. Find new leads moves them along.",
   },
   hold: {
     title: "On hold",
     short: "On hold",
-    help: "Waiting for more information before a decision. Each one says why and what's needed.",
+    help: "Something needs a look first (a recruiter posting, pay unknown, not sure it's open to you). Each one says why.",
   },
   archive: {
     title: "Archived",

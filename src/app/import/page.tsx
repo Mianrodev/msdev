@@ -46,7 +46,7 @@ export default async function UploadPage({ searchParams }: { searchParams: Searc
             </>
           ) : (
             <>
-              <p>Your leads are in. Go Home and run your weekly check.</p>
+              <p>Your leads are in. Go Home and press Find new leads.</p>
               <Link className="button primary" href="/#weekly">
                 Go to Home →
               </Link>

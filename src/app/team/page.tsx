@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { backToMySpaceAction, cancelInviteAction, inviteAction, resetLinkAction, setPersonActiveAction, viewSpaceAction } from "./actions";
+import {
+  backToMySpaceAction,
+  cancelInviteAction,
+  inviteAction,
+  resetLinkAction,
+  setPersonActiveAction,
+  viewSpaceAction,
+} from "./actions";
 import { InviteMaker, LinkButton, SubmitButton } from "@/components/client";
 import { fmtWhen } from "@/components/plain";
 import { Flash, PageHeader, type SearchParams } from "@/components/ui";
@@ -29,7 +36,7 @@ export default async function TeamPage({ searchParams }: { searchParams: SearchP
       <Flash sp={sp} />
       <PageHeader
         title="Team"
-        intro="Invite people to test the app. Each person gets their own private space — their own leads, search words, rules and privacy details. You can open anyone's space to help them."
+        intro="Invite someone to run their own job search here. They get a private space — their own leads, search words, About me and rules. After they join, remind them to type their own job titles and country on Find leads: the examples there are yours. You can open anyone's space to help."
       />
       {viewing && (
         <form action={backToMySpaceAction} style={{ marginBottom: "1rem" }}>
@@ -89,7 +96,11 @@ export default async function TeamPage({ searchParams }: { searchParams: SearchP
                         <SubmitButton
                           className={p.status === "active" ? "small danger" : "small"}
                           pending="…"
-                          confirm={p.status === "active" ? `Switch off ${p.name}? They're signed out and can't sign in. Nothing is deleted.` : undefined}
+                          confirm={
+                            p.status === "active"
+                              ? `Switch off ${p.name}? They're signed out and can't sign in. Nothing is deleted.`
+                              : undefined
+                          }
                         >
                           {p.status === "active" ? "Switch off" : "Switch on"}
                         </SubmitButton>

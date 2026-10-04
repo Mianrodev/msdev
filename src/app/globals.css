@@ -179,3 +179,13 @@ ul.plain li:last-child { border-bottom: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .viewing-bar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; justify-content: center; padding: .55rem 16px; background: var(--warn-bg); color: var(--warn); border-bottom: 1px solid var(--border); }
+
+/* The facts that decide a found job, shown as a row of small badges. */
+.facts { display: inline-flex; flex-wrap: wrap; gap: .25rem; }
+.badge.fact { font-size: .76em; padding: .02rem .45rem; }
+.glance { padding: .8rem 1rem; }
+@media (max-width: 640px) {
+  .steps li { flex-wrap: wrap; }
+  .steps .body { flex: 1 1 calc(100% - 3rem); }
+  .steps li > .button { flex: 1 1 100%; text-align: center; }
+}

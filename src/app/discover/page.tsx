@@ -36,8 +36,8 @@ export default async function FindLeadsPage({ searchParams }: { searchParams: Se
       >
         <form action={findLeadsAction}>
           <input type="hidden" name="back" value="/discover" />
-          <SubmitButton className="primary big" pending="Searching… (up to 2 minutes)">
-            Search now
+          <SubmitButton className="primary big" pending="Searching… this can take up to 5 minutes.">
+            Find new leads now
           </SubmitButton>
         </form>
       </PageHeader>
