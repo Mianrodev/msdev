@@ -21,6 +21,7 @@
  * New finds then go through the weekly check's automatic first look and wait
  * in "New to review" for the owner's yes / hold / no.
  */
+import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import {
   records,
@@ -485,6 +486,9 @@ export function remoteVerdict(p: {
   }
   return "NO — the listing doesn't say it's remote";
 }
+
+/** Bump when the way jobs are judged changes, so jobs skipped under the old checks are judged again. */
+const CHECKS_VERSION = 2;
 
 /** Rules the weekly check applies to found jobs (they only use details the job board provides). */
 export const DISCOVERY_RULES: RuleInput[] = [
@@ -1144,14 +1148,35 @@ export async function runDiscovery(
   // Same company + same job title = the same job, even if you saved it from LinkedIn or another site,
   // or the company posted it once per city.
   // Skipped jobs are remembered for a month, so a job rejected once isn't downloaded and judged again every week.
+  // The memory belongs to one way of judging: when your words, your rules or the checks change, every job is
+  // judged afresh (a job rejected by an older check isn't hidden for a month).
   const REMEMBER_MS = 30 * 86_400_000;
-  const rejected = {
-    ...(await getSetting<Record<string, { at: string; reason: string }>>(
-      ctx,
-      K.rejected,
-      {},
-    )),
-  };
+  const judging = createHash("sha256")
+    .update(
+      JSON.stringify([
+        CHECKS_VERSION,
+        settings.titleWords,
+        settings.skipWords,
+        settings.regionWords,
+        settings.otherRegionWords,
+        rules.map((r) => [
+          r.key,
+          r.enabled,
+          r.effect,
+          r.operator,
+          r.field,
+          r.value,
+        ]),
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 16);
+  const saved = await getSetting<{
+    judging?: string;
+    jobs?: Record<string, { at: string; reason: string }>;
+  }>(ctx, K.rejected, {});
+  const rejected: Record<string, { at: string; reason: string }> =
+    saved.judging === judging ? { ...(saved.jobs ?? {}) } : {};
   for (const [k, v] of Object.entries(rejected))
     if (Date.parse(today) - Date.parse(v.at) > REMEMBER_MS) delete rejected[k];
   const rejectedBefore = (key: string) => key in rejected;
@@ -1451,7 +1476,7 @@ export async function runDiscovery(
     );
   }
   await saveInternal(ctx, K.boardFailures, failures);
-  await saveInternal(ctx, K.rejected, rejected);
+  await saveInternal(ctx, K.rejected, { judging, jobs: rejected });
 
   // 3. Remote-job sites → companies you don't watch yet → confirmed on their own careers board.
   if (opts.sites !== false) {

@@ -15,6 +15,8 @@ import {
   remoteVerdict,
   reviewFoundJob,
   runDiscovery,
+  saveDiscoveryWords,
+  getDiscoverySettings,
   seedDiscoveryRules,
   titleMatches,
   DEFAULTS,
@@ -1462,6 +1464,20 @@ describe("Being frugal and reading Workday", () => {
     expect(rep2.filteredOut).toBe(1);
     expect(rep2.skippedTotal).toBe(0); // not judged again
     expect(asked.filter((u) => u.includes("/jobs/7")).length).toBe(fetches); // and not downloaded again
+
+    // Changing your words (or the rules) means every job is judged afresh.
+    const s = await getDiscoverySettings(ctx);
+    await saveDiscoveryWords(ctx, {
+      ...s,
+      skipWords: [...s.skipWords, "astronaut"],
+    });
+    const rep3 = await runDiscovery(ctx, {
+      fetcher,
+      today: "2026-10-11",
+      sites: false,
+      maxAgeMs: 0,
+    });
+    expect(rep3.skippedTotal).toBe(1);
   });
 });
 
