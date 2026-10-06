@@ -1268,7 +1268,14 @@ export async function runDiscovery(
         else report.closed++;
         await markListing(sys, r, open, company, today);
         const p = byId.get(k);
-        if (open && p && r.origin === DISCOVERY_ORIGIN && !applied(r))
+        // Found jobs, and jobs added by hand or by your AI with a company-board link, get the same checks.
+        const unchecked = !r.attributes.openToYourRegion;
+        if (
+          open &&
+          p &&
+          (r.origin === DISCOVERY_ORIGIN || unchecked) &&
+          !applied(r)
+        )
           await recheckFacts(sys, r, ref, p, settings, fetcher);
       }
     }

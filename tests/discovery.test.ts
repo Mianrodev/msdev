@@ -1497,6 +1497,47 @@ describe("Region wording", () => {
 });
 
 describe("Existing leads are re-checked against the posting", () => {
+  it("gives a job added by hand (with a company-board link) the same checks as a found job", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    const ok = (body: unknown) => ({ status: 200, json: async () => body });
+    const fetcher = async (url: string) => {
+      if (url.endsWith("/v1/boards/hb/jobs"))
+        return ok({
+          jobs: [
+            {
+              id: 9,
+              title: "Ops Generalist",
+              absolute_url: "https://job-boards.greenhouse.io/hb/jobs/9",
+              location: { name: "Remote" },
+            },
+          ],
+        });
+      if (url.includes("/jobs/9?questions=true"))
+        return ok({
+          content:
+            "Fully remote. This role is only open to candidates who live in the US.",
+          questions: [],
+        });
+      return { status: 404, json: async () => ({}) };
+    };
+    const added = (
+      await upsertLead(
+        ctx,
+        {
+          account: "HB",
+          opportunity: "Ops Generalist",
+          sourceUrl: "https://job-boards.greenhouse.io/hb/jobs/9",
+        },
+        "manual",
+      )
+    ).record;
+    await runDiscovery(ctx, { fetcher, today: "2026-10-06", sites: false });
+    const after = await getRecord(ctx, added.id);
+    expect(after.attributes.whoCanApply).toMatch(/^NO/);
+    expect(after.attributes.openToYourRegion).toBeTruthy();
+  });
+
   it("catches 'Remote anywhere in the US' and archives a Ready lead found before the check existed", async () => {
     const { workRestriction } = await import("@/sources/restrictions");
     expect(
