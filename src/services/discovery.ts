@@ -1276,7 +1276,15 @@ export async function runDiscovery(
           (r.origin === DISCOVERY_ORIGIN || unchecked) &&
           !applied(r)
         )
-          await recheckFacts(sys, r, ref, p, settings, fetcher);
+          // Re-read: marking the listing just updated this lead.
+          await recheckFacts(
+            sys,
+            await getRecord(sys, r.id),
+            ref,
+            p,
+            settings,
+            fetcher,
+          );
       }
     }
 
