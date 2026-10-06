@@ -32,6 +32,7 @@ const boards = JSON.parse(fs.readFileSync(boardsFile, "utf8")) as {
   company: string;
   provider: BoardRef["provider"];
   slug: string;
+  eu?: boolean;
 }[];
 const s = JSON.parse(fs.readFileSync(wordsFile, "utf8"));
 const today = new Date().toISOString().slice(0, 10);
@@ -45,6 +46,8 @@ async function judge(ref: BoardRef, company: string, p: Posting) {
     location: p.location,
     url: p.url,
     provider: ref.provider,
+    slug: ref.slug,
+    region: ref.region,
     posted: p.postedAt,
   };
   if (!titleMatches(p.title, s))
@@ -106,7 +109,11 @@ async function pool<T>(items: T[], n: number, fn: (t: T) => Promise<void>) {
 
 let done = 0;
 await pool(boards, 8, async (b) => {
-  const ref: BoardRef = { provider: b.provider, slug: b.slug };
+  const ref: BoardRef = {
+    provider: b.provider,
+    slug: b.slug,
+    ...(b.eu ? { region: "eu" as const } : {}),
+  };
   const res = await fetchBoard(ref);
   done++;
   if (!res.ok) {
