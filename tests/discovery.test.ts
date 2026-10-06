@@ -1175,6 +1175,14 @@ describe("Who can apply — the wordings that slipped through", () => {
     expect(
       regionVerdictFor({ ...plain, title: "Solutions Engineer - India" }, s),
     ).toMatch(/^YES — the title/);
+    // "Remote - IND" is India.
+    expect(
+      regionVerdictFor(
+        { ...plain, location: "Remote - IND" },
+        { ...s, regionWords: [...s.regionWords, "IND"] },
+      ),
+    ).toMatch(/^YES/);
+    expect(DEFAULTS.regionWords).toContain("IND");
     // The hold rule acts on a written UNKNOWN answer, but not on a missing one (leads added by hand).
     const rule = {
       key: "discovery.region_stated",

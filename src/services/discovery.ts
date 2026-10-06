@@ -200,6 +200,7 @@ export const DEFAULTS = {
   ],
   regionWords: [
     "India",
+    "IND", // "Remote - IND"
     "Anywhere",
     "Worldwide",
     "Global",
