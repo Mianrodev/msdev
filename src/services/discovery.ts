@@ -1269,14 +1269,8 @@ export async function runDiscovery(
         else report.closed++;
         await markListing(sys, r, open, company, today);
         const p = byId.get(k);
-        // Found jobs, and jobs added by hand or by your AI with a company-board link, get the same checks.
-        const unchecked = !r.attributes.openToYourRegion;
-        if (
-          open &&
-          p &&
-          (r.origin === DISCOVERY_ORIGIN || unchecked) &&
-          !applied(r)
-        )
+        // Every lead with a company-board link (found, added by hand or by your AI) gets the same checks.
+        if (open && p && !applied(r))
           // Re-read: marking the listing just updated this lead.
           await recheckFacts(
             sys,
