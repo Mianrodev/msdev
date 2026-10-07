@@ -11,7 +11,11 @@ import {
   sourceVerificationAction,
   updateRecordAction,
 } from "../../actions";
-import { ApplicationSelect, CopyButton, SubmitButton } from "@/components/client";
+import {
+  ApplicationSelect,
+  CopyButton,
+  SubmitButton,
+} from "@/components/client";
 import {
   actorName,
   APPLICATION_CHOICES,
@@ -28,11 +32,25 @@ import {
   TIER_NAMES,
 } from "@/components/plain";
 import { AttributeFields, RecordFields } from "@/components/record-fields";
-import { BackLink, Checks, Ext, FactBadges, Flash, StatusPill, whyItsHere, type SearchParams } from "@/components/ui";
+import {
+  BackLink,
+  Checks,
+  Ext,
+  FactBadges,
+  Flash,
+  StatusPill,
+  whyItsHere,
+  type SearchParams,
+} from "@/components/ui";
 import { FIT_TIERS, SOURCE_VERIFICATION, VERDICTS } from "@/core/types";
 import { getAnswers } from "@/services/answers";
 import { listHistory } from "@/services/history";
-import { evaluateRecord, getRecord, NotFoundError, pendingDecision } from "@/services/records";
+import {
+  evaluateRecord,
+  getRecord,
+  NotFoundError,
+  pendingDecision,
+} from "@/services/records";
 import { getSession, viewerFor } from "@/services/request";
 
 export const dynamic = "force-dynamic";
@@ -79,10 +97,16 @@ export default async function LeadPage({
   ]);
   const list = listOf(r);
   const link = r.nextStepUrl ?? r.sourceUrl;
-  const bind = <T,>(fn: (id: string, f: FormData) => Promise<T>) => fn.bind(null, id);
+  const bind = <T,>(fn: (id: string, f: FormData) => Promise<T>) =>
+    fn.bind(null, id);
 
   const facts: [string, string | null][] = [
-    ["Effort to apply", typeof r.attributes.effortToApply === "string" ? r.attributes.effortToApply : null],
+    [
+      "Effort to apply",
+      typeof r.attributes.effortToApply === "string"
+        ? r.attributes.effortToApply
+        : null,
+    ],
     ["Location / remote notes", r.location],
     ["Found", r.dateFound ? fmtDay(r.dateFound) : null],
     ["Found on", r.sourceBoard],
@@ -100,7 +124,9 @@ export default async function LeadPage({
   return (
     <>
       <Flash sp={sp} />
-      <BackLink href={`/records?list=${list}`}>Back to {LISTS[list].title}</BackLink>
+      <BackLink href={`/records?list=${list}`}>
+        Back to {LISTS[list].title}
+      </BackLink>
       <div className="spread">
         <div style={{ flex: "1 1 420px" }}>
           <h1>{r.opportunity}</h1>
@@ -109,7 +135,11 @@ export default async function LeadPage({
           </p>
           <div className="row" style={{ alignItems: "center", gap: ".8rem" }}>
             <StatusPill r={r} />
-            <ApplicationSelect action={bind(outreachAction)} value={r.outreachStatus} choices={APPLICATION_CHOICES} />
+            <ApplicationSelect
+              action={bind(outreachAction)}
+              value={r.outreachStatus}
+              choices={APPLICATION_CHOICES}
+            />
           </div>
         </div>
         {link && (
@@ -126,8 +156,15 @@ export default async function LeadPage({
 
       {(r.origin === "discovery" || whyItsHere(r)) && (
         <section className="card glance" style={{ margin: "1rem 0 0" }}>
-          <div className="row" style={{ alignItems: "center", gap: ".6rem", flexWrap: "wrap" }}>
-            <strong>At a glance:</strong> <FactBadges r={r} all={r.origin === "discovery"} />
+          <div
+            className="row"
+            style={{ alignItems: "center", gap: ".6rem", flexWrap: "wrap" }}
+          >
+            <strong>At a glance:</strong>{" "}
+            <FactBadges
+              r={r}
+              all={r.origin === "discovery" || r.stage === "verify"}
+            />
           </div>
           {whyItsHere(r) && (
             <p style={{ margin: ".5rem 0 0" }}>
@@ -136,7 +173,8 @@ export default async function LeadPage({
           )}
           {list === "ready" && !r.fitTier && (
             <p className="small muted" style={{ margin: ".4rem 0 0" }}>
-              Not yet rated against your profile. Your AI can rate it (Your AI page), or rate it yourself below.
+              Not yet rated against your profile. Your AI can rate it (Your AI
+              page), or rate it yourself below.
             </p>
           )}
         </section>
@@ -155,15 +193,19 @@ export default async function LeadPage({
                   "Read about the job below. Use your saved answers below (Copy buttons) to fill in the application."
                 ) : (
                   <>
-                    Read about the job below. Tip: write your usual answers once on <Link href="/answers">My answers</Link> and
-                    they&apos;ll appear here with Copy buttons.
+                    Read about the job below. Tip: write your usual answers once
+                    on <Link href="/answers">My answers</Link> and they&apos;ll
+                    appear here with Copy buttons.
                   </>
                 )}
               </li>
-              <li>Open the listing and apply yourself. This app never applies or sends anything for you.</li>
               <li>
-                Then set <strong>Your application</strong> (top of this page) to &quot;Applied&quot;. It moves to your Applied
-                list.
+                Open the listing and apply yourself. This app never applies or
+                sends anything for you.
+              </li>
+              <li>
+                Then set <strong>Your application</strong> (top of this page) to
+                &quot;Applied&quot;. It moves to your Applied list.
               </li>
             </ol>
           </>
@@ -174,13 +216,16 @@ export default async function LeadPage({
             <p>
               {r.outreachStatus === "sent_manually" &&
                 'You\'ve applied. When they get back to you, change "Your application" at the top of this page.'}
-              {r.outreachStatus === "responded" && 'They got back to you. If it\'s an interview, set it to "Interviewing".'}
+              {r.outreachStatus === "responded" &&
+                'They got back to you. If it\'s an interview, set it to "Interviewing".'}
               {r.outreachStatus === "interviewing" &&
                 "Interviewing — read the job and your prepared material again before each conversation. Note what was discussed in Response notes (Details)."}
-              {r.outreachStatus === "offer" && "Congratulations on the offer! Note the details in Response notes (Details)."}
+              {r.outreachStatus === "offer" &&
+                "Congratulations on the offer! Note the details in Response notes (Details)."}
               {r.outreachStatus === "rejected" &&
                 "Not successful this time. It stays on your Applied list for your records — nothing is deleted."}
-              {r.outreachStatus === "closed" && "You withdrew or stopped. It stays on your Applied list for your records."}
+              {r.outreachStatus === "closed" &&
+                "You withdrew or stopped. It stays on your Applied list for your records."}
             </p>
             {typeof r.attributes.appliedOn === "string" && (
               <p className="small muted" style={{ margin: 0 }}>
@@ -193,8 +238,9 @@ export default async function LeadPage({
         {list === "review" && (
           <>
             <p>
-              The app found this job but couldn&apos;t sort it by itself — see the badges above for what&apos;s missing. Read
-              about it below (or open the listing), then decide:
+              The app found this job but couldn&apos;t sort it by itself — see
+              the badges above for what&apos;s missing. Read about it below (or
+              open the listing), then decide:
             </p>
             <div className="row" style={{ marginTop: ".6rem" }}>
               {(
@@ -213,7 +259,8 @@ export default async function LeadPage({
               ))}
             </div>
             <p className="small muted" style={{ marginTop: ".6rem" }}>
-              &quot;Yes&quot; moves it to Ready. You still apply yourself — the app never applies for you.
+              &quot;Yes&quot; moves it to Ready. You still apply yourself — the
+              app never applies for you.
             </p>
           </>
         )}
@@ -221,18 +268,28 @@ export default async function LeadPage({
         {list === "checking" && pending && (
           <>
             <p>
-              This lead is still being checked. <strong>Easiest:</strong> press Find new leads on the Home page and it will be
-              sorted for you. Or make the decision yourself:
+              This lead is still being checked. <strong>Easiest:</strong> press
+              Find new leads on the Home page and it will be sorted for you. Or
+              make the decision yourself:
             </p>
-            <form action={bind(decideAction)} className="stack" style={{ marginTop: ".6rem" }}>
+            <form
+              action={bind(decideAction)}
+              className="stack"
+              style={{ marginTop: ".6rem" }}
+            >
               <input type="hidden" name="stage" value={pending.stage} />
               <div>
-                <strong>{DECISION_STEP_TITLES[pending.stage].title}:</strong> {DECISION_STEP_TITLES[pending.stage].question}
+                <strong>{DECISION_STEP_TITLES[pending.stage].title}:</strong>{" "}
+                {DECISION_STEP_TITLES[pending.stage].question}
               </div>
               <div className="fields">
                 <label>
                   Your decision{" "}
-                  {pending.suggested && <span className="hint">(suggested: {DECISION_NAMES[pending.suggested]})</span>}
+                  {pending.suggested && (
+                    <span className="hint">
+                      (suggested: {DECISION_NAMES[pending.suggested]})
+                    </span>
+                  )}
                   <select name="verdict" defaultValue={pending.suggested}>
                     {VERDICTS[pending.stage].map((v) => (
                       <option key={v} value={v}>
@@ -243,7 +300,11 @@ export default async function LeadPage({
                 </label>
                 <label>
                   Why? <span className="hint">(a few words — required)</span>
-                  <input name="reason" required placeholder="e.g. Remote and pay looks right" />
+                  <input
+                    name="reason"
+                    required
+                    placeholder="e.g. Remote and pay looks right"
+                  />
                 </label>
               </div>
               <div>
@@ -256,7 +317,8 @@ export default async function LeadPage({
         {list === "hold" && (
           <>
             <p>
-              <strong>Why it&apos;s on hold:</strong> {r.holdReason ?? "No reason given."}
+              <strong>Why it&apos;s on hold:</strong>{" "}
+              {r.holdReason ?? "No reason given."}
             </p>
             {r.nextAction && (
               <p>
@@ -265,11 +327,18 @@ export default async function LeadPage({
             )}
             <p>
               When you have the missing information, update the details below
-              {r.stage === "verify" ? ' and set "Is the link still open?"' : ""}, then put it back.
+              {r.stage === "verify" ? ' and set "Is the link still open?"' : ""}
+              , then put it back.
             </p>
-            <form action={bind(restoreAction)} className="inline" style={{ marginTop: ".5rem" }}>
+            <form
+              action={bind(restoreAction)}
+              className="inline"
+              style={{ marginTop: ".5rem" }}
+            >
               <input type="hidden" name="reason" value="Put back by you" />
-              <SubmitButton pending="Putting it back…">Put it back</SubmitButton>
+              <SubmitButton pending="Putting it back…">
+                Put it back
+              </SubmitButton>
             </form>
           </>
         )}
@@ -277,10 +346,15 @@ export default async function LeadPage({
         {list === "archive" && (
           <>
             <p>
-              <strong>Why it was archived:</strong> {r.archiveReason ?? "No reason given."}
+              <strong>Why it was archived:</strong>{" "}
+              {r.archiveReason ?? "No reason given."}
             </p>
             <p>Archived leads are kept for your records. Changed your mind?</p>
-            <form action={bind(restoreAction)} className="inline" style={{ marginTop: ".5rem" }}>
+            <form
+              action={bind(restoreAction)}
+              className="inline"
+              style={{ marginTop: ".5rem" }}
+            >
               <input type="hidden" name="reason" value="Put back by you" />
               <SubmitButton className="" pending="Putting it back…">
                 Put it back
@@ -291,34 +365,37 @@ export default async function LeadPage({
       </section>
 
       {/* ---------------- About this job (found automatically) ---------------- */}
-      {(r.origin === "discovery" || typeof r.extra.postingSummary === "string") && (
+      {(r.origin === "discovery" ||
+        typeof r.extra.postingSummary === "string") && (
         <section className="card" style={{ marginBottom: "1rem" }}>
           <h2>About this job</h2>
           <dl className="kv">
-            {JOB_FACTS.filter(([k]) => typeof r.attributes[k] === "string").map(([k, label]) => (
-              <div key={k} style={{ display: "contents" }}>
-                <dt>{label}</dt>
-                <dd>
-                  {k === "postedOn" ? (
-                    fmtDay(r.attributes[k] as string)
-                  ) : /^(YES|NO|UNKNOWN)\b/.test(String(r.attributes[k])) ? (
-                    <>
-                      <span
-                        className={`badge ${/^YES/.test(String(r.attributes[k])) ? "pass" : /^NO/.test(String(r.attributes[k])) ? "fail" : "unknown"}`}
-                      >
-                        {String(r.attributes[k]).split(/\s+—\s+/)[0]}
-                      </span>{" "}
-                      {String(r.attributes[k])
-                        .split(/\s+—\s+/)
-                        .slice(1)
-                        .join(" — ")}
-                    </>
-                  ) : (
-                    String(r.attributes[k])
-                  )}
-                </dd>
-              </div>
-            ))}
+            {JOB_FACTS.filter(([k]) => typeof r.attributes[k] === "string").map(
+              ([k, label]) => (
+                <div key={k} style={{ display: "contents" }}>
+                  <dt>{label}</dt>
+                  <dd>
+                    {k === "postedOn" ? (
+                      fmtDay(r.attributes[k] as string)
+                    ) : /^(YES|NO|UNKNOWN)\b/.test(String(r.attributes[k])) ? (
+                      <>
+                        <span
+                          className={`badge ${/^YES/.test(String(r.attributes[k])) ? "pass" : /^NO/.test(String(r.attributes[k])) ? "fail" : "unknown"}`}
+                        >
+                          {String(r.attributes[k]).split(/\s+—\s+/)[0]}
+                        </span>{" "}
+                        {String(r.attributes[k])
+                          .split(/\s+—\s+/)
+                          .slice(1)
+                          .join(" — ")}
+                      </>
+                    ) : (
+                      String(r.attributes[k])
+                    )}
+                  </dd>
+                </div>
+              ),
+            )}
           </dl>
           {typeof r.extra.postingSummary === "string" && (
             <>
@@ -327,7 +404,8 @@ export default async function LeadPage({
             </>
           )}
           <p className="small muted">
-            Taken word for word from the company&apos;s job board. Open the listing for the full text.
+            Taken word for word from the company&apos;s job board. Open the
+            listing for the full text.
           </p>
         </section>
       )}
@@ -358,40 +436,54 @@ export default async function LeadPage({
       )}
 
       {/* ---------------- Earlier versions (text replaced by your AI is never lost) ---------------- */}
-      {Array.isArray(r.extra.earlierVersions) && r.extra.earlierVersions.length > 0 && (
-        <details className="card" style={{ marginBottom: "1rem" }}>
-          <summary>Earlier versions of the brief and answers ({r.extra.earlierVersions.length})</summary>
-          {(r.extra.earlierVersions as { at?: string; brief?: string; answers?: string }[]).map((v, i) => (
-            <div key={i} style={{ marginTop: ".8rem" }}>
-              <p className="small muted" style={{ margin: 0 }}>
-                Replaced {v.at ? fmtWhen(v.at) : ""}
-              </p>
-              {v.brief && (
-                <>
-                  <div className="spread">
-                    <h3 style={{ margin: 0 }}>Brief</h3>
-                    <CopyButton text={v.brief} />
-                  </div>
-                  <div className="package">{v.brief}</div>
-                </>
-              )}
-              {v.answers && (
-                <>
-                  <div className="spread">
-                    <h3 style={{ margin: 0 }}>Answers</h3>
-                    <CopyButton text={v.answers} />
-                  </div>
-                  <div className="package">{v.answers}</div>
-                </>
-              )}
-            </div>
-          ))}
-        </details>
-      )}
+      {Array.isArray(r.extra.earlierVersions) &&
+        r.extra.earlierVersions.length > 0 && (
+          <details className="card" style={{ marginBottom: "1rem" }}>
+            <summary>
+              Earlier versions of the brief and answers (
+              {r.extra.earlierVersions.length})
+            </summary>
+            {(
+              r.extra.earlierVersions as {
+                at?: string;
+                brief?: string;
+                answers?: string;
+              }[]
+            ).map((v, i) => (
+              <div key={i} style={{ marginTop: ".8rem" }}>
+                <p className="small muted" style={{ margin: 0 }}>
+                  Replaced {v.at ? fmtWhen(v.at) : ""}
+                </p>
+                {v.brief && (
+                  <>
+                    <div className="spread">
+                      <h3 style={{ margin: 0 }}>Brief</h3>
+                      <CopyButton text={v.brief} />
+                    </div>
+                    <div className="package">{v.brief}</div>
+                  </>
+                )}
+                {v.answers && (
+                  <>
+                    <div className="spread">
+                      <h3 style={{ margin: 0 }}>Answers</h3>
+                      <CopyButton text={v.answers} />
+                    </div>
+                    <div className="package">{v.answers}</div>
+                  </>
+                )}
+              </div>
+            ))}
+          </details>
+        )}
 
       {/* ---------------- Saved answers (same on every lead) ---------------- */}
       {list === "ready" && answers.length > 0 && (
-        <details className="card" style={{ marginBottom: "1rem" }} open={!(r.preparedBrief || r.preparedAnswers)}>
+        <details
+          className="card"
+          style={{ marginBottom: "1rem" }}
+          open={!(r.preparedBrief || r.preparedAnswers)}
+        >
           <summary>Your saved answers ({answers.length})</summary>
           {answers.map((a, i) => (
             <div key={i} style={{ marginTop: ".8rem" }}>
@@ -413,7 +505,8 @@ export default async function LeadPage({
         <section className="card">
           <h2>Checks against your rules</h2>
           <p className="muted small">
-            ✓ OK · ✗ fails (it will be archived) · ! needs a look (it goes on hold) · ? not known yet (never counts against it)
+            ✓ OK · ✗ fails (it will be archived) · ! needs a look (it goes on
+            hold) · ? not known yet (never counts against it)
           </p>
           <Checks results={overall.results} />
         </section>
@@ -422,7 +515,8 @@ export default async function LeadPage({
         <section className="card">
           <h2>Is the link still open?</h2>
           <p className="muted small">
-            A lead can only be Ready once you (or your research) have checked the listing is still open. Currently:{" "}
+            A lead can only be Ready once you (or your research) have checked
+            the listing is still open. Currently:{" "}
             <strong>{SOURCE_NAMES[r.sourceVerification]}</strong>.
           </p>
           <form action={bind(sourceVerificationAction)} className="inline">
@@ -480,8 +574,9 @@ export default async function LeadPage({
             <RecordFields r={r} />
             <h3>Details the rules check</h3>
             <p className="muted small">
-              These are what your rules look at. If you don&apos;t know something, leave it empty or type &quot;unknown&quot; —
-              never guess.
+              These are what your rules look at. If you don&apos;t know
+              something, leave it empty or type &quot;unknown&quot; — never
+              guess.
             </p>
             <AttributeFields attributes={r.attributes} />
             <div>
@@ -500,11 +595,18 @@ export default async function LeadPage({
               <h3>Put on hold</h3>
               <label>
                 Why? <span className="hint">(required)</span>
-                <input name="reason" required placeholder="e.g. Pay not listed" />
+                <input
+                  name="reason"
+                  required
+                  placeholder="e.g. Pay not listed"
+                />
               </label>
               <label>
                 What&apos;s needed? <span className="hint">(optional)</span>
-                <input name="nextAction" placeholder="e.g. Ask the recruiter about pay" />
+                <input
+                  name="nextAction"
+                  placeholder="e.g. Ask the recruiter about pay"
+                />
               </label>
               <div>
                 <SubmitButton className="" pending="Saving…">
@@ -518,9 +620,15 @@ export default async function LeadPage({
               <h3>Archive</h3>
               <label>
                 Why? <span className="hint">(required)</span>
-                <input name="reason" required placeholder="e.g. Position filled" />
+                <input
+                  name="reason"
+                  required
+                  placeholder="e.g. Position filled"
+                />
               </label>
-              <p className="muted small">Nothing is deleted — you can put it back any time.</p>
+              <p className="muted small">
+                Nothing is deleted — you can put it back any time.
+              </p>
               <div>
                 <SubmitButton className="danger" pending="Saving…">
                   Archive
@@ -560,12 +668,16 @@ export default async function LeadPage({
           {hist.map((h) => (
             <li key={h.id}>
               <strong>{eventName(h.event)}</strong>
-              {h.newStatus && h.priorStatus !== h.newStatus && <> → {statusPhrase(h.newStatus)}</>}
+              {h.newStatus && h.priorStatus !== h.newStatus && (
+                <> → {statusPhrase(h.newStatus)}</>
+              )}
               <span className="muted">
                 {" "}
                 · {fmtWhen(h.occurredAt)} · {actorName(h.actor, viewer)}
               </span>
-              {h.reason && <div className="muted">{humanizeReason(h.reason)}</div>}
+              {h.reason && (
+                <div className="muted">{humanizeReason(h.reason)}</div>
+              )}
             </li>
           ))}
         </ul>

@@ -502,6 +502,137 @@ export function careersSystem(url: string, company: string): string | null {
  * Answers the title the page shows and any "who can apply" limit in its text, or null (gone, moved,
  * or unreadable).
  */
+/** One job read from its own careers page (not a job board): what the checks need. */
+export interface JobPage {
+  title: string;
+  location: string | null;
+  /** The whole description as plain text. */
+  text: string;
+  /** First posted, as the company's own system says (YYYY-MM-DD), or null when the page doesn't say. */
+  postedAt: string | null;
+  /** The page's own remote flag: true = remote, false = on-site or hybrid, null = not said. */
+  remote: boolean | null;
+}
+
+const isoDay = (v: unknown): string | null => {
+  if (typeof v !== "string" || !v.trim()) return null;
+  const t = Date.parse(v);
+  return Number.isNaN(t) ? null : new Date(t).toISOString().slice(0, 10);
+};
+
+/**
+ * Read a job on the company's own careers page so the same checks can run on it: Workday and BambooHR
+ * publish the job as data; other pages are read for their schema.org JobPosting, or as plain text.
+ * null = couldn't read it, or the page says the job is closed.
+ */
+export async function readJobPage(url: string, fetcher: Fetcher = defaultFetcher): Promise<JobPage | null> {
+  try {
+    const wd =
+      /^https:\/\/([a-z0-9-]+)\.(wd\d+\.myworkdayjobs\.com|myworkdaysite\.com)\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)\/job\/([^?#]+)/i.exec(url);
+    if (wd) {
+      const res = await fetcher(`https://${wd[1]}.${wd[2]}/wday/cxs/${wd[1]}/${wd[3]}/job/${wd[4]}`);
+      if (res.status !== 200) return null;
+      const d = (await res.json()) as {
+        jobPostingInfo?: { title?: string; jobDescription?: string; location?: string; startDate?: string; canApply?: boolean; remoteType?: string };
+      };
+      const i = d.jobPostingInfo;
+      if (!i?.title || i.canApply === false) return null;
+      const where = [i.location, i.remoteType].filter(Boolean).join(" · ") || null;
+      return {
+        title: i.title,
+        location: where,
+        text: plainText(`${i.jobDescription ?? ""}<p>${where ?? ""}`, 200_000) ?? "",
+        postedAt: isoDay(i.startDate),
+        remote: /remote/i.test(where ?? "") ? true : null,
+      };
+    }
+    const bh = /^https:\/\/([a-z0-9-]+)\.bamboohr\.com\/careers\/(\d+)/i.exec(url);
+    if (bh) {
+      const res = await fetcher(`https://${bh[1]}.bamboohr.com/careers/${bh[2]}/detail`);
+      if (res.status !== 200) return null;
+      const d = (await res.json()) as {
+        result?: {
+          jobOpening?: {
+            jobOpeningName?: string;
+            jobOpeningStatus?: string;
+            description?: string;
+            datePosted?: string;
+            locationType?: string;
+            atsLocation?: Record<string, string | null>;
+            location?: Record<string, string | null>;
+          };
+        };
+      };
+      const j = d.result?.jobOpening;
+      if (!j?.jobOpeningName || (j.jobOpeningStatus && !/open/i.test(j.jobOpeningStatus))) return null;
+      const loc = j.atsLocation ?? j.location ?? {};
+      // BambooHR: locationType "1" = remote, "2" = hybrid, "0" = on-site.
+      const remote = j.locationType === "1" ? true : j.locationType === "0" || j.locationType === "2" ? false : null;
+      const where =
+        [loc.city, loc.state, loc.country ?? loc.addressCountry].filter(Boolean).join(", ") + (remote ? " (Remote)" : "");
+      return {
+        title: j.jobOpeningName,
+        location: where || null,
+        text: plainText(`${j.description ?? ""}<p>${where}`, 200_000) ?? "",
+        postedAt: isoDay(j.datePosted),
+        remote,
+      };
+    }
+    const res = await fetcher(url);
+    if (res.status !== 200 || !res.text) return null;
+    const page = (await res.text()).slice(0, 800_000);
+    if (
+      /\b(no longer (available|accepting|open)|position (has been )?filled|job (posting )?(is )?(closed|expired)|this job (has )?expired)\b/i.test(
+        page.slice(0, 200_000),
+      )
+    )
+      return null;
+    // schema.org JobPosting, which most careers sites publish for search engines.
+    for (const m of page.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+      let data: unknown;
+      try {
+        data = JSON.parse(m[1].trim());
+      } catch {
+        continue;
+      }
+      const items = (Array.isArray(data) ? data : [data, ...(((data as { "@graph"?: unknown[] })?.["@graph"]) ?? [])]) as Record<
+        string,
+        unknown
+      >[];
+      const jp = items.find((x) => x && String(x["@type"] ?? "").includes("JobPosting"));
+      if (!jp || typeof jp.title !== "string") continue;
+      const places = ([] as unknown[])
+        .concat(jp.jobLocation ?? [])
+        .map((l) => {
+          const a = ((l as { address?: Record<string, unknown> })?.address ?? {}) as Record<string, unknown>;
+          const country = typeof a.addressCountry === "string" ? a.addressCountry : (a.addressCountry as { name?: string })?.name;
+          return [a.addressLocality, a.addressRegion, country].filter((x) => typeof x === "string" && x).join(", ");
+        })
+        .filter(Boolean);
+      const allowed = ([] as unknown[])
+        .concat(jp.applicantLocationRequirements ?? [])
+        .map((l) => (l as { name?: string })?.name)
+        .filter(Boolean);
+      const remote = /telecommute/i.test(String(jp.jobLocationType ?? "")) ? true : null;
+      const where = [...places, ...allowed.map((a) => `Remote: ${a}`)].join(" / ") + (remote && !allowed.length ? " (Remote)" : "");
+      return {
+        title: jp.title,
+        location: where || null,
+        text: plainText(`${String(jp.description ?? "")}<p>${where}`, 200_000) ?? "",
+        postedAt: isoDay(jp.datePosted),
+        remote,
+      };
+    }
+    // No data on the page: its text still answers remote / region / who can apply.
+    const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(page)?.[1]?.replace(/\s+/g, " ").trim();
+    const text = plainText(page.replace(/<(script|style|nav|header|footer)\b[\s\S]*?<\/\1>/gi, " "), 200_000) ?? "";
+    if (!title || text.length < 200) return null;
+    return { title, location: null, text, postedAt: null, remote: null };
+  } catch {
+    return null;
+  }
+}
+
 export async function postingPageTitle(
   url: string,
   fetcher: Fetcher = defaultFetcher,

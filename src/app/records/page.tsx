@@ -1,8 +1,25 @@
 import Link from "next/link";
 import { outreachAction } from "../actions";
 import { ApplicationSelect } from "@/components/client";
-import { APPLICATION_CHOICES, fmtDay, LIST_TO_VIEW, LISTS, TIER_NAMES, type ListKey } from "@/components/plain";
-import { Empty, Ext, FactBadges, Flash, one, PageHeader, StatusBadge, whyItsHere, type SearchParams } from "@/components/ui";
+import {
+  APPLICATION_CHOICES,
+  fmtDay,
+  LIST_TO_VIEW,
+  LISTS,
+  TIER_NAMES,
+  type ListKey,
+} from "@/components/plain";
+import {
+  Empty,
+  Ext,
+  FactBadges,
+  Flash,
+  one,
+  PageHeader,
+  StatusBadge,
+  whyItsHere,
+  type SearchParams,
+} from "@/components/ui";
 import { isUnknown } from "@/core/types";
 import type { RecordRow } from "@/db/schema";
 import { countsByView, listRecords, type SortKey } from "@/services/records";
@@ -11,7 +28,15 @@ import { getCtx } from "@/services/request";
 export const dynamic = "force-dynamic";
 
 const PAGE = 300;
-const LIST_ORDER: ListKey[] = ["review", "ready", "applied", "checking", "hold", "archive", "all"];
+const LIST_ORDER: ListKey[] = [
+  "review",
+  "ready",
+  "applied",
+  "checking",
+  "hold",
+  "archive",
+  "all",
+];
 const VIEW_TO_LIST: Record<string, ListKey> = {
   review: "review",
   prospects: "ready",
@@ -22,7 +47,10 @@ const VIEW_TO_LIST: Record<string, ListKey> = {
   all: "all",
 };
 
-const SORTS: Record<string, { label: string; key: SortKey; dir: "asc" | "desc" }> = {
+const SORTS: Record<
+  string,
+  { label: string; key: SortKey; dir: "asc" | "desc" }
+> = {
   recent: { label: "Recently changed", key: "updated", dir: "desc" },
   company: { label: "Company A–Z", key: "account", dir: "asc" },
   found: { label: "Newest found", key: "found", dir: "desc" },
@@ -30,9 +58,14 @@ const SORTS: Record<string, { label: string; key: SortKey; dir: "asc" | "desc" }
   posted: { label: "Newest posted", key: "posted", dir: "desc" },
 };
 
-type Col = { head: string; cell: (r: RecordRow) => React.ReactNode; className?: string };
+type Col = {
+  head: string;
+  cell: (r: RecordRow) => React.ReactNode;
+  className?: string;
+};
 
-const attr = (r: RecordRow, k: string) => (typeof r.attributes[k] === "string" ? (r.attributes[k] as string) : null);
+const attr = (r: RecordRow, k: string) =>
+  typeof r.attributes[k] === "string" ? (r.attributes[k] as string) : null;
 
 const why = (r: RecordRow) => whyItsHere(r) ?? "—";
 const where = (r: RecordRow) => {
@@ -43,7 +76,10 @@ const where = (r: RecordRow) => {
 const COLS: Record<ListKey, Col[]> = {
   applied: [
     { head: "Applied on", cell: (r) => fmtDay(attr(r, "appliedOn")) },
-    { head: "Link", cell: (r) => <Ext href={r.nextStepUrl ?? r.sourceUrl} label="Open" /> },
+    {
+      head: "Link",
+      cell: (r) => <Ext href={r.nextStepUrl ?? r.sourceUrl} label="Open" />,
+    },
   ],
   review: [
     { head: "Where", cell: where, className: "why" },
@@ -52,11 +88,23 @@ const COLS: Record<ListKey, Col[]> = {
     { head: "Link", cell: (r) => <Ext href={r.sourceUrl} label="Open" /> },
   ],
   ready: [
-    { head: "Fit", cell: (r) => (r.fitTier ? TIER_NAMES[r.fitTier] : <span className="muted">Not yet rated</span>) },
+    {
+      head: "Fit",
+      cell: (r) =>
+        r.fitTier ? (
+          TIER_NAMES[r.fitTier]
+        ) : (
+          <span className="muted">Not yet rated</span>
+        ),
+    },
     { head: "Why it's here", cell: why, className: "why" },
-    { head: "Checked", cell: (r) => <FactBadges r={r} /> },
+    // Every check is shown on Ready, so a missing one stands out.
+    { head: "Checked", cell: (r) => <FactBadges r={r} all /> },
     { head: "Posted", cell: (r) => fmtDay(attr(r, "postedOn")) },
-    { head: "Link", cell: (r) => <Ext href={r.nextStepUrl ?? r.sourceUrl} label="Open" /> },
+    {
+      head: "Link",
+      cell: (r) => <Ext href={r.nextStepUrl ?? r.sourceUrl} label="Open" />,
+    },
   ],
   checking: [
     { head: "Where it is", cell: (r) => <StatusBadge r={r} /> },
@@ -64,12 +112,24 @@ const COLS: Record<ListKey, Col[]> = {
     { head: "Found", cell: (r) => fmtDay(r.dateFound) },
   ],
   hold: [
-    { head: "Why it's on hold", cell: (r) => r.holdReason ?? "—", className: "why" },
+    {
+      head: "Why it's on hold",
+      cell: (r) => r.holdReason ?? "—",
+      className: "why",
+    },
     { head: "Checked", cell: (r) => <FactBadges r={r} /> },
-    { head: "What's needed", cell: (r) => r.nextAction ?? "—", className: "why" },
+    {
+      head: "What's needed",
+      cell: (r) => r.nextAction ?? "—",
+      className: "why",
+    },
   ],
   archive: [
-    { head: "Why it was archived", cell: (r) => r.archiveReason ?? "—", className: "why" },
+    {
+      head: "Why it was archived",
+      cell: (r) => r.archiveReason ?? "—",
+      className: "why",
+    },
     { head: "Archived", cell: (r) => fmtDay(r.archivedAt) },
   ],
   all: [
@@ -79,19 +139,37 @@ const COLS: Record<ListKey, Col[]> = {
   ],
 };
 
-export default async function LeadsPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function LeadsPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   const sp = await searchParams;
   const ctx = await getCtx();
   const requested = one(sp.list) ?? VIEW_TO_LIST[one(sp.view) ?? ""] ?? "ready";
-  const list: ListKey = (LIST_ORDER as string[]).includes(requested) ? (requested as ListKey) : "ready";
+  const list: ListKey = (LIST_ORDER as string[]).includes(requested)
+    ? (requested as ListKey)
+    : "ready";
   const q = one(sp.q)?.trim() || undefined;
   const sortName =
-    one(sp.sort) && SORTS[one(sp.sort)!] ? one(sp.sort)! : list === "ready" ? "fit" : list === "review" ? "company" : "recent";
+    one(sp.sort) && SORTS[one(sp.sort)!]
+      ? one(sp.sort)!
+      : list === "ready"
+        ? "fit"
+        : list === "review"
+          ? "company"
+          : "recent";
   const sort = SORTS[sortName];
   const limit = Math.min(Number(one(sp.limit)) || PAGE, 5000);
 
   const [rows, counts] = await Promise.all([
-    listRecords(ctx, { view: LIST_TO_VIEW[list], q, sort: sort.key, dir: sort.dir, limit: limit + 1 }),
+    listRecords(ctx, {
+      view: LIST_TO_VIEW[list],
+      q,
+      sort: sort.key,
+      dir: sort.dir,
+      limit: limit + 1,
+    }),
     countsByView(ctx),
   ]);
   const shown = rows.slice(0, limit);
@@ -125,7 +203,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
       </PageHeader>
 
       <nav className="tabs" aria-label="Lists">
-        {LIST_ORDER.filter((l) => l !== "checking" || countOf.checking > 0 || list === "checking").map((l) => (
+        {LIST_ORDER.filter(
+          (l) =>
+            l !== "checking" || countOf.checking > 0 || list === "checking",
+        ).map((l) => (
           <Link
             key={l}
             href={`/records?list=${l}`}
@@ -140,11 +221,20 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
         {LISTS[list].help}
       </p>
 
-      <form className="inline" method="get" action="/records" style={{ margin: ".6rem 0 .9rem" }}>
+      <form
+        className="inline"
+        method="get"
+        action="/records"
+        style={{ margin: ".6rem 0 .9rem" }}
+      >
         <input type="hidden" name="list" value={list} />
         <label style={{ flex: "1 1 260px" }}>
           Search
-          <input name="q" defaultValue={q} placeholder="Company, job title, location or notes" />
+          <input
+            name="q"
+            defaultValue={q}
+            placeholder="Company, job title, location or notes"
+          />
         </label>
         <label>
           Order
@@ -165,22 +255,33 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
       </form>
 
       {shown.length === 0 ? (
-        <Empty title={q ? `Nothing on this list matches "${q}".` : `Nothing on the ${LISTS[list].title} list right now.`}>
+        <Empty
+          title={
+            q
+              ? `Nothing on this list matches "${q}".`
+              : `Nothing on the ${LISTS[list].title} list right now.`
+          }
+        >
           {list === "review" && !q && (
             <p className="muted">
-              Jobs only wait here when the app couldn&apos;t sort them by itself. Usually this list is empty: new jobs go straight
-              to Ready, On hold or Archived. <Link href="/">Find new leads</Link> runs every Monday, or press it on the Home page.
+              Jobs only wait here when the app couldn&apos;t sort them by
+              itself. Usually this list is empty: new jobs go straight to Ready,
+              On hold or Archived. <Link href="/">Find new leads</Link> runs
+              every Monday, or press it on the Home page.
             </p>
           )}
           {list === "applied" && !q && (
             <p className="muted">
-              When you apply for a job, pick &quot;Applied&quot; in the <strong>Applied?</strong> column of any list (or on the
-              lead&apos;s page). It moves here so you can track what happens next.
+              When you apply for a job, pick &quot;Applied&quot; in the{" "}
+              <strong>Applied?</strong> column of any list (or on the
+              lead&apos;s page). It moves here so you can track what happens
+              next.
             </p>
           )}
           {list === "ready" && !q && (
             <p className="muted">
-              Jobs land here once they pass every check. Press <Link href="/#weekly">Find new leads</Link> on the Home page to
+              Jobs land here once they pass every check. Press{" "}
+              <Link href="/#weekly">Find new leads</Link> on the Home page to
               search now; it also runs every Monday.
             </p>
           )}
@@ -188,7 +289,9 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
       ) : (
         <>
           <p className="small muted">
-            {rows.length > limit ? `Showing the first ${limit}.` : `${shown.length} ${shown.length === 1 ? "lead" : "leads"}.`}
+            {rows.length > limit
+              ? `Showing the first ${limit}.`
+              : `${shown.length} ${shown.length === 1 ? "lead" : "leads"}.`}
           </p>
           <div className="table-wrap">
             <table>
@@ -213,9 +316,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
                     </td>
                     <td className="wrap">
                       <Link href={`/records/${r.id}`}>{r.opportunity}</Link>
-                      {list !== "review" && r.location && !isUnknown(r.location) && (
-                        <div className="muted small">Where: {r.location}</div>
-                      )}
+                      {list !== "review" &&
+                        r.location &&
+                        !isUnknown(r.location) && (
+                          <div className="muted small">Where: {r.location}</div>
+                        )}
                     </td>
                     {list === "applied" && (
                       <td>
@@ -251,7 +356,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
           </div>
           {rows.length > limit && (
             <p style={{ textAlign: "center" }}>
-              <Link className="button" href={href({ limit: String(limit + PAGE) })}>
+              <Link
+                className="button"
+                href={href({ limit: String(limit + PAGE) })}
+              >
                 Show more
               </Link>
             </p>
@@ -263,18 +371,28 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
         <summary>Download this list</summary>
         <div className="grid cols-2">
           <div>
-            <a className="button primary" href={`/export/records?mode=shared&view=${LIST_TO_VIEW[list]}`}>
+            <a
+              className="button primary"
+              href={`/export/records?mode=shared&view=${LIST_TO_VIEW[list]}`}
+            >
               Download shared copy
             </a>
             <p className="small muted">
-              Safe to send to someone. Personal details, prepared briefs and answers, notes and contacts are removed.
+              Safe to send to someone. Personal details, prepared briefs and
+              answers, notes and contacts are removed.
             </p>
           </div>
           <div>
-            <a className="button" href={`/export/records?mode=internal&view=${LIST_TO_VIEW[list]}`}>
+            <a
+              className="button"
+              href={`/export/records?mode=internal&view=${LIST_TO_VIEW[list]}`}
+            >
               Download full backup
             </a>
-            <p className="small muted">Everything, for your own safekeeping. Don&apos;t send this one to anyone.</p>
+            <p className="small muted">
+              Everything, for your own safekeeping. Don&apos;t send this one to
+              anyone.
+            </p>
           </div>
         </div>
         <p className="small muted">Files open in Excel or Google Sheets.</p>

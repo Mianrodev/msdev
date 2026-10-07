@@ -51,8 +51,10 @@ import {
   careersSystem,
   fetchSite,
   postingPageTitle,
+  readJobPage,
   SITES,
   warningSigns,
+  type JobPage,
   type Listing,
   type Site,
 } from "@/sources/job-sites";
@@ -489,7 +491,7 @@ export function remoteVerdict(p: {
 }
 
 /** Bump when the way jobs are judged changes, so jobs skipped under the old checks are judged again. */
-const CHECKS_VERSION = 2;
+const CHECKS_VERSION = 3;
 
 /** Rules the weekly check applies to found jobs (they only use details the job board provides). */
 export const DISCOVERY_RULES: RuleInput[] = [
@@ -572,6 +574,42 @@ export const DISCOVERY_RULES: RuleInput[] = [
       'Postings by recruiters and agencies ("client undisclosed", "on behalf of our client", staffing firms) don\'t name the real employer, so the job can\'t be checked against the company. They go On hold for you to look at, instead of Ready.',
     appliesFrom: "screen",
     field: "employer",
+    operator: "not_starts_with_any",
+    value: ["UNKNOWN"],
+    effect: "hold",
+    enabled: true,
+  },
+  {
+    key: "discovery.remote_known",
+    label: "Clearly says it's remote",
+    description:
+      "A job only goes to Ready when the app could confirm it's remote. When the posting couldn't be read, it goes On hold for you to check.",
+    appliesFrom: "screen",
+    field: "remoteCheck",
+    operator: "not_starts_with_any",
+    value: ["UNKNOWN"],
+    effect: "hold",
+    enabled: true,
+  },
+  {
+    key: "discovery.who_known",
+    label: "Full posting read for who can apply",
+    description:
+      'A job only goes to Ready when the whole posting was read for lines like "only open to candidates in the US". When it couldn\'t be read, it goes On hold.',
+    appliesFrom: "screen",
+    field: "whoCanApply",
+    operator: "not_starts_with_any",
+    value: ["UNKNOWN"],
+    effect: "hold",
+    enabled: true,
+  },
+  {
+    key: "discovery.date_known",
+    label: "Posting date known",
+    description:
+      "A job only goes to Ready when the app knows it was posted in the last 45 days. When the posting doesn't show a date, it goes On hold for you to check.",
+    appliesFrom: "screen",
+    field: "freshness",
     operator: "not_starts_with_any",
     value: ["UNKNOWN"],
     effect: "hold",
@@ -1496,6 +1534,29 @@ export async function runDiscovery(
   await saveInternal(ctx, K.boardFailures, failures);
   await saveInternal(ctx, K.rejected, { judging, jobs: rejected });
 
+  // Leads whose link is a company's own careers page, not a job board: read the page and check them too.
+  {
+    let pages = 0;
+    for (const recs of byUrl.values())
+      for (const r of recs) {
+        if (pages >= 40) break;
+        if (
+          r.status === "archived" ||
+          applied(r) ||
+          !/^https?:\/\//i.test(r.sourceUrl ?? "")
+        )
+          continue;
+        pages++;
+        await checkCareersPage(
+          sys,
+          await getRecord(sys, r.id),
+          settings,
+          fetcher,
+          today,
+        );
+      }
+  }
+
   // 3. Remote-job sites → companies you don't watch yet → confirmed on their own careers board.
   if (opts.sites !== false) {
     const tSites = Date.now();
@@ -2026,28 +2087,129 @@ async function recheckFacts(
       new Date().toISOString().slice(0, 10),
     ),
   };
+  await saveFacts(sys, r, fresh, "the posting");
+}
+
+/** Save re-judged facts that changed, and note them in History. Extra fields (e.g. location) are saved as they are. */
+async function saveFacts(
+  sys: Ctx,
+  r: RecordRow,
+  fresh: Record<string, string>,
+  where: string,
+  extra: Record<string, unknown> = {},
+  verification?: "verified",
+) {
   const changed = Object.entries(fresh).filter(([k, v]) => {
     const was = String(r.attributes[k] ?? "");
     // An unclear reading never replaces a definite answer (e.g. one you confirmed yourself).
     if (/^UNKNOWN/.test(v) && /^YES/.test(was)) return false;
     return was.split(" — ")[0] !== v.split(" — ")[0];
   });
-  if (!changed.length) return;
+  if (!changed.length && !verification) return;
   await sys.db
     .update(records)
     .set({
-      attributes: { ...r.attributes, ...fresh },
+      attributes: { ...r.attributes, ...extra, ...Object.fromEntries(changed) },
+      ...(verification
+        ? {
+            sourceVerification: verification,
+            lastVerifiedAt: new Date().toISOString().slice(0, 10),
+          }
+        : {}),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(records.workspaceId, sys.workspaceId), eq(records.id, r.id)));
-  await logHistory(sys, {
-    entityType: "record",
-    entityId: r.id,
-    event: "facts_rechecked",
-    reason: `Re-checked against the posting: ${changed.map(([k, v]) => `${FACT_NAMES[k] ?? k} is now ${v.split(" — ")[0]}`).join(", ")}`,
-  });
+  if (changed.length)
+    await logHistory(sys, {
+      entityType: "record",
+      entityId: r.id,
+      event: "facts_rechecked",
+      reason: `Re-checked against ${where}: ${changed.map(([k, v]) => `${FACT_NAMES[k] ?? k} is now ${v.split(" — ")[0]}`).join(", ")}`,
+    });
+}
+
+/**
+ * Leads whose link is the company's own careers page (Workday, BambooHR, its own site) rather than a job
+ * board: read the page and run the same checks as on a found job. A page that can't be read, or doesn't show
+ * a fact, leaves that fact "not known" — and an unclear fact keeps the lead off Ready.
+ */
+async function checkCareersPage(
+  sys: Ctx,
+  r: RecordRow,
+  s: DiscoverySettings,
+  fetcher: Fetcher,
+  today: string,
+) {
+  const url = r.sourceUrl!;
+  const key = `page3:${url}`;
+  const kept = await readCache<{ page: JobPage | null }>(
+    sys.db,
+    key,
+    12 * 3_600_000,
+  );
+  let page = kept?.value.page;
+  if (!kept) {
+    page = await readJobPage(url, fetcher);
+    await writeCache(sys.db, key, { page });
+  }
+  const unread =
+    "UNKNOWN — the app couldn't read this careers page; open the link to check";
+  if (!page) {
+    await saveFacts(
+      sys,
+      r,
+      {
+        verifiedOpen: String(r.attributes.verifiedOpen ?? "") || unread,
+        openToYourRegion: String(r.attributes.openToYourRegion ?? "") || unread,
+        remoteCheck: String(r.attributes.remoteCheck ?? "") || unread,
+        whoCanApply: String(r.attributes.whoCanApply ?? "") || unread,
+        freshness: String(r.attributes.freshness ?? "") || unread,
+        employer:
+          String(r.attributes.employer ?? "") ||
+          employerVerdict(r.account, null),
+      },
+      "the careers page",
+    );
+    return;
+  }
+  const job = {
+    title: page.title || r.opportunity,
+    location: page.location ?? r.location ?? null,
+    workplace: page.remote === true ? ("remote" as const) : null,
+    summary: page.text,
+  };
+  const limit = whoCanApply({ ...job, onlyFor: undefined }, s);
+  const remote = remoteVerdict(job);
+  await saveFacts(
+    sys,
+    r,
+    {
+      verifiedOpen: `YES — open on ${r.account}'s own careers page (checked ${today})`,
+      openToYourRegion: regionVerdictFor(job, s),
+      remoteCheck:
+        page.remote === false
+          ? "NO — the careers page marks it on-site or hybrid"
+          : remote,
+      whoCanApply: limit
+        ? `NO — ${limit}`
+        : "YES — the full posting doesn't limit who can apply to another country",
+      employer: employerVerdict(r.account, page.text),
+      freshness: page.postedAt
+        ? freshness(page.postedAt, today)
+        : "UNKNOWN — the careers page doesn't show when it was posted",
+    },
+    "the careers page",
+    page.postedAt
+      ? {
+          postedOn: page.postedAt,
+          ...(page.location ? { postingLocation: page.location } : {}),
+        }
+      : {},
+    "verified",
+  );
 }
 const FACT_NAMES: Record<string, string> = {
+  verifiedOpen: "Still listed",
   openToYourRegion: "Open to your region",
   remoteCheck: "Really remote",
   whoCanApply: "Who can apply",
@@ -2200,11 +2362,16 @@ export async function reviewFoundJob(
   if (choice === "no")
     return archiveRecord(ctx, id, `${by}: ${why || "not for me"}`);
   let r = await getRecord(ctx, id);
-  // Saying "worth applying" confirms the facts the search couldn't settle (e.g. which countries can apply).
-  const unclear = ["openToYourRegion", "employer"].filter((k) =>
-    /^UNKNOWN/.test(String(r.attributes[k] ?? "")),
-  );
-  if (unclear.length) {
+  // When YOU say "worth applying", that confirms the facts the search couldn't settle (e.g. which countries
+  // can apply). Your AI can't: a job it rates only reaches Ready once the app itself has confirmed every check.
+  const unclear = [
+    "openToYourRegion",
+    "employer",
+    "remoteCheck",
+    "whoCanApply",
+    "freshness",
+  ].filter((k) => /^UNKNOWN/.test(String(r.attributes[k] ?? "")));
+  if (unclear.length && opts.by !== "your AI") {
     const attributes = { ...r.attributes };
     for (const k of unclear) attributes[k] = `YES — ${by} checked it`;
     await ctx.db

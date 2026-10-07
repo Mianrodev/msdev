@@ -1631,3 +1631,132 @@ describe("Existing leads are re-checked against the posting", () => {
     ).toBe(true);
   });
 });
+
+describe("Careers pages that aren't job boards", () => {
+  const ok = (body: unknown) => ({
+    status: 200,
+    json: async () => body,
+    text: async () => String(body),
+  });
+  it("reads Workday, BambooHR and schema.org job pages", async () => {
+    const { readJobPage } = await import("@/sources/job-sites");
+    const fetcher = async (url: string) => {
+      if (url.includes("/wday/cxs/acme/Ext/job/Remote-India/Ops_R1"))
+        return ok({
+          jobPostingInfo: {
+            title: "Ops Lead",
+            location: "Remote India",
+            startDate: "2026-09-30",
+            jobDescription: "<p>Fully remote.</p>",
+          },
+        });
+      if (url.endsWith("acme.bamboohr.com/careers/7/detail"))
+        return ok({
+          result: {
+            jobOpening: {
+              jobOpeningName: "Analyst",
+              jobOpeningStatus: "Open",
+              datePosted: "2026-09-22",
+              locationType: "1",
+              atsLocation: { city: "Pune", country: "India" },
+              description: "<p>Work remotely.</p>",
+            },
+          },
+        });
+      if (url === "https://careers.acme.com/job/9")
+        return ok(
+          `<html><script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title: "PM", datePosted: "2026-09-01", jobLocationType: "TELECOMMUTE", applicantLocationRequirements: [{ name: "Romania" }], description: "Build things." })}</script></html>`,
+        );
+      return { status: 404, json: async () => ({}), text: async () => "" };
+    };
+    expect(
+      await readJobPage(
+        "https://acme.wd1.myworkdayjobs.com/en-US/Ext/job/Remote-India/Ops_R1",
+        fetcher,
+      ),
+    ).toMatchObject({
+      title: "Ops Lead",
+      postedAt: "2026-09-30",
+      remote: true,
+    });
+    expect(
+      await readJobPage("https://acme.bamboohr.com/careers/7", fetcher),
+    ).toMatchObject({
+      location: "Pune, India (Remote)",
+      postedAt: "2026-09-22",
+      remote: true,
+    });
+    expect(
+      await readJobPage("https://careers.acme.com/job/9", fetcher),
+    ).toMatchObject({
+      location: "Remote: Romania",
+      postedAt: "2026-09-01",
+      remote: true,
+    });
+  });
+
+  it("checks a lead on a careers page like a found job, and holds it when the date isn't shown", async () => {
+    const ctx = await testCtx();
+    await seedDiscoveryRules(ctx);
+    const page = (body: string) => ({
+      status: 200,
+      json: async () => ({}),
+      text: async () => body,
+    });
+    const fetcher = async (url: string) => {
+      if (url === "https://careers.acme.com/job/1")
+        return page(
+          `<html><script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title: "Ops Lead", datePosted: "2026-09-20", jobLocationType: "TELECOMMUTE", applicantLocationRequirements: [{ name: "India" }], description: "Fully remote role." })}</script></html>`,
+        );
+      if (url === "https://careers.acme.com/job/2")
+        return page(
+          `<html><title>Ops Analyst</title><body>${"This is a fully remote role open to candidates in India. ".repeat(10)}</body></html>`,
+        );
+      return { status: 404, json: async () => ({}), text: async () => "" };
+    };
+    const a = (
+      await upsertLead(
+        ctx,
+        {
+          account: "Acme",
+          opportunity: "Ops Lead",
+          sourceUrl: "https://careers.acme.com/job/1",
+        },
+        "manual",
+      )
+    ).record;
+    const b = (
+      await upsertLead(
+        ctx,
+        {
+          account: "Acme",
+          opportunity: "Ops Analyst",
+          sourceUrl: "https://careers.acme.com/job/2",
+        },
+        "manual",
+      )
+    ).record;
+    await runDiscovery(ctx, { fetcher, today: "2026-10-07", sites: false });
+    const ra = await getRecord(ctx, a.id);
+    expect(ra.sourceVerification).toBe("verified");
+    for (const k of [
+      "openToYourRegion",
+      "remoteCheck",
+      "whoCanApply",
+      "employer",
+      "freshness",
+      "verifiedOpen",
+    ])
+      expect(String(ra.attributes[k]), k).toMatch(/^YES/);
+    const rb = await getRecord(ctx, b.id);
+    expect(String(rb.attributes.freshness)).toMatch(/^UNKNOWN/);
+    // Your AI can't wave an unclear fact through; the job stays off Ready.
+    await expect(
+      reviewFoundJob(ctx, b.id, "yes", {
+        by: "your AI",
+        fit: "good",
+        why: "fits",
+      }),
+    ).rejects.toThrow();
+  });
+});

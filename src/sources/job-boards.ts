@@ -289,6 +289,30 @@ export async function fetchPostingSummary(
         .join("<p>");
       return { summary: plain(html), onlyFor: workRestriction(plain(html, FULL)) };
     }
+    if (board.provider === "lever") {
+      const host = board.region === "eu" ? "https://api.eu.lever.co" : "https://api.lever.co";
+      const res = await fetcher(`${host}/v0/postings/${slug}/${id}`);
+      if (res.status !== 200) return null;
+      const r = (await res.json()) as {
+        descriptionPlain?: string;
+        additionalPlain?: string;
+        lists?: { text?: string; content?: string }[];
+      };
+      const full = [
+        r.descriptionPlain,
+        ...(r.lists ?? []).map((l) => `${l.text ?? ""}\n${plain(l.content, FULL) ?? ""}`),
+        r.additionalPlain,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      return { summary: full.slice(0, 1500) || null, onlyFor: workRestriction(full) };
+    }
+    // Other boards publish descriptions only in their full list: read it and find this job.
+    const all = await fetchBoard(board, fetcher);
+    if (all.ok) {
+      const p = all.postings.find((x) => x.id === postingId);
+      if (p && (p.summary || p.onlyFor !== undefined)) return { summary: p.summary, onlyFor: p.onlyFor ?? null };
+    }
   } catch {
     // no description is fine — the listing link still works
   }
