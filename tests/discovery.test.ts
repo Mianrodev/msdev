@@ -671,6 +671,16 @@ describe("finding leads", () => {
     await addBoard(other, "https://jobs.lever.co/acme");
     await runDiscovery(other, { fetcher: counting, sites: false });
     expect(calls).toEqual([]);
+    // New title words: the copy has no descriptions for newly matching jobs, so the board is read again.
+    const s = await getDiscoverySettings(ctx);
+    await saveDiscoveryWords(ctx, {
+      ...s,
+      titleWords: [...s.titleWords, "product manager"],
+    });
+    await runDiscovery(ctx, { fetcher: counting, sites: false });
+    expect(calls.filter((u) => u.includes("/v0/postings/acme"))).toHaveLength(
+      1,
+    );
   });
 
   it("keeps only small facts in the shared copy, plus descriptions of jobs someone could want", async () => {

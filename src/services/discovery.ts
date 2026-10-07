@@ -1072,8 +1072,16 @@ export async function runDiscovery(
   const worthDescribing = (title: string) =>
     anyonesWords.some((w) => containsTerm(title, w));
   type Kept = { company: string | null; postings: Posting[] };
-  // "board2": copies that carry each job's "who can apply" check (older copies aren't reused).
-  const keyOf = (ref: BoardRef) => `board2:${boardKey(ref)}`;
+  // "board2": copies that carry each job's "who can apply" check (older copies aren't reused). A copy keeps
+  // descriptions only for titles matching the words at the time, so it belongs to those words: change your
+  // words and boards are read afresh (otherwise newly matching jobs would have no description to judge).
+  const wordsTag = createHash("sha256")
+    .update(
+      JSON.stringify([...anyonesWords].map((w) => w.toLowerCase()).sort()),
+    )
+    .digest("hex")
+    .slice(0, 10);
+  const keyOf = (ref: BoardRef) => `board2:${wordsTag}:${boardKey(ref)}`;
   const kept = await readCacheMany<Kept>(
     ctx.db,
     boards.map((b) => keyOf(b.ref)),
