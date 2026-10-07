@@ -1116,12 +1116,19 @@ describe("Who can apply — the wordings that slipped through", () => {
         null,
       ),
     ).toMatch(/company name/);
+    // Job aggregators that repost other companies' jobs don't name the real employer.
     expect(
       recruiterSign(
         "Jobgether",
         "This position is listed on behalf of a partner company",
       ),
-    ).toBeNull(); // wording not in the list: no false alarm
+    ).not.toBeNull();
+    expect(
+      recruiterSign(
+        "Acme",
+        "We are a logistics company. Apply on our website.",
+      ),
+    ).toBeNull();
     expect(
       recruiterSign("Acme", "We are hiring for our client, a fintech."),
     ).toMatch(/posting says/);

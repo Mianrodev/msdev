@@ -2101,8 +2101,8 @@ async function saveFacts(
 ) {
   const changed = Object.entries(fresh).filter(([k, v]) => {
     const was = String(r.attributes[k] ?? "");
-    // An unclear reading never replaces a definite answer (e.g. one you confirmed yourself).
-    if (/^UNKNOWN/.test(v) && /^YES/.test(was)) return false;
+    // An unclear reading never replaces a fact you confirmed yourself ("YES — Reviewed by you checked it").
+    if (/^UNKNOWN/.test(v) && /^YES\b.*checked it$/.test(was)) return false;
     return was.split(" — ")[0] !== v.split(" — ")[0];
   });
   if (!changed.length && !verification) return;

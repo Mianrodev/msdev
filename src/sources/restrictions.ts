@@ -44,7 +44,10 @@ const LIMITS: [string, RegExp, boolean][] = [
   ],
   [
     "residents or citizens of another country only",
-    new RegExp(`${PLACES}\\s+(?:residents?|citizens?|nationals?)\\s+only\\b`, "i"),
+    new RegExp(
+      `${PLACES}\\s+(?:residents?|citizens?|nationals?)\\s+only\\b`,
+      "i",
+    ),
     true,
   ],
   [
@@ -134,10 +137,24 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * - `yourWords`: your region words ("India", "APAC"…): a sentence that also names one of them is not a
  *   limit against you ("Open to candidates in the US, Canada and India").
  */
-export function workRestriction(text: string | null | undefined, listedForYou = false, yourWords: string[] = []): string | null {
+export function workRestriction(
+  text: string | null | undefined,
+  listedForYou = false,
+  yourWords: string[] = [],
+): string | null {
   if (!text) return null;
-  const mine = yourWords.map((w) => w.trim()).filter((w) => w && !/^(anywhere|worldwide|global|international|remote)$/i.test(w));
-  const namesYou = (s: string) => mine.some((w) => new RegExp(`(?<![\\p{L}\\p{N}])${esc(w)}(?![\\p{L}\\p{N}])`, "iu").test(s));
+  const mine = yourWords
+    .map((w) => w.trim())
+    .filter(
+      (w) =>
+        w && !/^(anywhere|worldwide|global|international|remote)$/i.test(w),
+    );
+  const namesYou = (s: string) =>
+    mine.some((w) =>
+      new RegExp(`(?<![\\p{L}\\p{N}])${esc(w)}(?![\\p{L}\\p{N}])`, "iu").test(
+        s,
+      ),
+    );
   const sentences = text.split(SENTENCE);
   for (const [why, re, always] of LIMITS) {
     if (!always && listedForYou) continue;
@@ -156,15 +173,20 @@ export function workRestriction(text: string | null | undefined, listedForYou = 
 
 /** Limits that are often just a form question companies ask on every job: ignored when the job names your country. */
 export function formQuestionOnly(limit: string): boolean {
-  return LIMITS.some(([why, , always]) => !always && limit.startsWith(`${why}:`));
+  return LIMITS.some(
+    ([why, , always]) => !always && limit.startsWith(`${why}:`),
+  );
 }
 
 /** Postings by recruiters and agencies: the real employer is unknown, so the job can't be checked against the company. */
 const AGENCY_WORDS =
-  /\b(client undisclosed|undisclosed client|confidential client|our client|on behalf of (?:a|our|its|the) client|for (?:a|our) client|staffing|recruitment (?:agency|firm|partner|services)|recruiting (?:agency|firm|partner)|talent (?:solutions|partners?|marketplace|agency)|placement (?:agency|firm)|hiring partner|hiring for (?:a|our) client)\b/i;
+  /\b(client undisclosed|undisclosed client|confidential client|our client|on behalf of (?:a|our|its|the) client|for (?:a|our) client|staffing|recruitment (?:agency|firm|partner|services)|recruiting (?:agency|firm|partner)|talent (?:solutions|partners?|marketplace|agency)|placement (?:agency|firm)|hiring partner|hiring for (?:a|our) client|(?:listed|posted|published) on behalf of (?:a|an|our|one of our) (?:partner|client|customer)s?(?: company| companies)?|jobgether)\b/i;
 
 /** Why this looks like a recruiter's posting rather than the employer's own, or null. */
-export function recruiterSign(company: string, text: string | null | undefined): string | null {
+export function recruiterSign(
+  company: string,
+  text: string | null | undefined,
+): string | null {
   const c = AGENCY_WORDS.exec(company);
   if (c) return `the company name says "${c[0]}"`;
   const t = AGENCY_WORDS.exec((text ?? "").slice(0, 3000));
