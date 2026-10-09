@@ -58,6 +58,10 @@
   .op-filters .actions { position: static; }
 }
 
+.op-coverage { font-size: .84rem; color: var(--muted); background: var(--surface-2); border-radius: var(--radius-sm); padding: .4rem .6rem; }
+.op-coverage summary { color: var(--accent); font-weight: 600; }
+.op-coverage p { margin: .35rem 0 0; }
+
 /* ---------- banners and status */
 .op-banner { display: flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-2) var(--space-3); border-radius: var(--radius); margin-bottom: var(--space-3); font-size: .93rem; border: 1px solid transparent; }
 .op-banner strong { display: block; }

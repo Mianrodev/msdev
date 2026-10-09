@@ -74,6 +74,8 @@ export function SearchForm({
   action,
   live,
   view,
+  liveScope = [],
+  liveSummary = [],
 }: {
   module: ModuleId;
   def: ModuleDef<Q>;
@@ -81,6 +83,10 @@ export function SearchForm({
   action: (f: FormData) => Promise<void>;
   live: { ok: boolean; reason: string };
   view: string;
+  /** What live search can see, from each live provider — shown before searching. */
+  liveScope?: string[];
+  /** One-line version, always visible. */
+  liveSummary?: string[];
 }) {
   const { t } = copyFor();
   const groups = [...new Set(def.filters.map((f) => f.group))];
@@ -101,6 +107,15 @@ export function SearchForm({
             </label>
           </div>
           {!live.ok && <span className="muted small">Live unavailable: {live.reason}</span>}
+          {live.ok && liveScope.length > 0 && (
+            <details className="op-coverage">
+              <summary>{liveSummary.join(" ") || "What live search covers"} More…</summary>
+              {liveScope.map((c) => (
+                <p key={c}>{c}</p>
+              ))}
+              <p>No results means no match among the notices read — not that no relevant tenders exist.</p>
+            </details>
+          )}
         </fieldset>
         {groups.map((g) => {
           const fs = def.filters.filter((f) => f.group === g);

@@ -55,7 +55,7 @@ The layers are separate on purpose:
 | Source retrieval | `src/sources/opportunities/*` | Providers return `NormalizedItem`s; nothing else sees raw formats. |
 | Normalisation and dedup | provider `normalize…`, `core/opportunities/dedup.ts` | Identical values merge their evidence; different values become a **conflict** that keeps both. |
 | Evidence storage | `opp_items.fields` (JSON) | Every known value has ≥1 evidence entry: kind, provider, source URL, retrieved-at, published-at, verbatim quote. |
-| AI enrichment | `ai-enricher.ts` | Optional, on request, schema-validated, labelled; never sets dates, amounts or eligibility. |
+| AI enrichment | `ai-enricher.ts` | Optional, on request, schema-validated, labelled; never sets dates, amounts or eligibility. No automatic model fallback unless `OPP_AI_FALLBACKS` is set. |
 | Matching and ranking | `core/opportunities/modules/*` | Deterministic rules. Unknown inputs are left out of the score (not counted as zero or as a pass); `coverage` says how much weight was scorable. |
 | Presentation | `src/app/opportunities`, `src/components/opportunities` | Reads only normalised items and match results. |
 
@@ -93,14 +93,33 @@ The layers are separate on purpose:
 
 ### Find a Tender (UK) — live, working
 
-- API: `https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?stages=tender` (keyless).
+- API: `https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?updatedFrom=…&limit=100` (keyless).
 - Licence: Open Government Licence v3.0 — storage and reuse allowed with attribution. The attribution line
   is shown on detail pages and included in exports.
-- The API has no keyword search, so the app reads the most recently updated tender notices (last 21 days,
-  at most 3 pages × 100) and filters locally; the search says when results may be incomplete.
-- Pages are cached for 30 minutes (shared `source_cache` table). Verified in this environment: a live search
-  returned 94 notices.
-- Switch off with `OPP_LIVE_FIND_A_TENDER=off`.
+- **What one live search reads** (`src/sources/opportunities/find-a-tender.ts`):
+  - every release of every notice type updated in the last `OPP_FTS_LOOKBACK_DAYS` days (default **3**),
+    newest first, in pages of 100, up to `OPP_FTS_MAX_PAGES` pages (default **20 = 2,000 releases**);
+  - a contracting process is kept only if its **newest** release in that window is a tender, tender update,
+    amendment or cancellation — processes that have moved to award/contract (or are only at planning) are left out;
+  - then the module's filters run locally (keywords, buyer, geography, type, deadline range, budget), and
+    notices whose published deadline has passed are hidden unless “Include notices whose deadline has passed” is ticked.
+- **It does not use `stages=tender`.** In this review that filter returned only older-regime notices (legal basis
+  `32014L0024`/`32014L0025`) and silently left out Procurement Act 2023 notices (`2023/54`) — 15 of 141 tender
+  releases over two days. The official docs describe `stages` only as “stage of the contracting process”.
+- **Not covered:** tenders published before the window and not updated since; notices only on Contracts Finder or
+  devolved portals (Public Contracts Scotland, Sell2Wales, eTendersNI); private-sector RFPs; other countries.
+  Procurement Act notices marked “below threshold” *are* published on Find a Tender and are included.
+- **Measured on 9 Oct 2026** (real API, default settings): the whole 3-day window was 1,368 releases in 14 pages,
+  read in about 5 seconds; 286 were open-stage tender notices; 0 failed validation.
+- Coverage is stated before a live search (“What live search covers”), in a “Coverage of this live search” banner
+  next to results (including when there are none), and on the Sources page. An empty live result says it is not
+  evidence that no relevant tenders exist.
+- Pages are cached for 30 minutes (shared `source_cache` table). Switch off with `OPP_LIVE_FIND_A_TENDER=off`.
+- **Broader coverage needs** a background sync rather than read-at-search-time: a scheduled job (the app already
+  has a Vercel cron) that pages the API with `updatedFrom` incrementally and keeps a local index of open notices,
+  so every search covers *all* currently open tenders; plus Contracts Finder (legacy below-threshold, rate-limited)
+  and devolved portals where they publish OCDS, then TED (EU) and SAM.gov (US) behind their own terms/keys.
+  See `docs/LIVE-DATA-PLAN.md`.
 
 ### Planned (need credentials or a data-provider decision)
 
@@ -127,6 +146,26 @@ Listed in `src/sources/opportunities/registry.ts` and on the **Sources** page:
    Use the module's field keys (see `fieldLabels` in the module file). Use `itemKey()` for identity.
 4. Register it in `registry.ts`. Add a normaliser test with a small fixture (see `tests/opportunities-services.test.ts`).
 5. Read credentials from `process.env` inside the provider only; never send them to the browser.
+
+## AI enrichment (optional)
+
+- **Off by default.** Runs only when both `OPP_AI_ENRICHMENT=on` and `ANTHROPIC_API_KEY` are set, and only when a
+  signed-in user presses “Generate AI summary” on one record. Searches never call the AI.
+- **Model:** `OPP_AI_MODEL`, default `claude-opus-5-5`, at low effort with structured (schema-constrained) output.
+- **Automatic fallback: off.** Nothing is sent to another model unless the administrator sets `OPP_AI_FALLBACKS`
+  (`default` = Anthropic picks the fallback by refusal category; or a comma-separated list of model ids). Fallback
+  requests are billed at the fallback model's rates.
+- **Per-request bounds:** input capped at 40,000 characters of the record's published text (roughly 10k tokens);
+  output capped by `OPP_AI_MAX_TOKENS` (default 4,000, includes thinking); SDK timeout 60 s, 2 retries.
+- **Usage limits:** `OPP_AI_SUMMARIES_PER_DAY` per workspace (default 25), counted before the call.
+- **Cost control:** worst case per summary ≈ input tokens × input price + `OPP_AI_MAX_TOKENS` × output price. Using Anthropic's
+  model price table as of 6 Oct 2026 for `claude-opus-5-5` ($4 / $20 per million input / output tokens), that is about $0.04 + $0.08 ≈ **$0.12 at most per summary**, so the default daily cap bounds one
+  workspace at about $3/day. Lower it by: lowering `OPP_AI_SUMMARIES_PER_DAY` or `OPP_AI_MAX_TOKENS`, choosing a
+  cheaper `OPP_AI_MODEL`, leaving fallbacks off, and setting a spend limit in the Anthropic Console. Check current
+  prices before relying on these figures. A Claude subscription (e.g. Max) does not cover API usage.
+- **Verification status:** the adapter is tested only with a **mocked client** (`tests/opportunities-services.test.ts`:
+  request shape, no fallback by default, token cap, schema validation, rejection of figures not in the source). It
+  has **not** been called against the real API — no key is configured in this environment.
 
 ## Security and multi-customer deployment
 
@@ -162,4 +201,4 @@ admins and billing. To resell safely, run **one deployment and one database per 
   safety, Find a Tender normalisation and caching, AI output guard).
 - Browser walkthrough (Playwright, desktop 1360px and mobile 390px): all four modules searched, detail
   pages, save, lists, notes, status, comparison, partial and failed states, live tender search, CSV export,
-  brand previews, keyboard skip link, no horizontal overflow on mobile.
+  brand previews, keyboard skip link, no horizontal overflow on mobile. Screenshots: `docs/review/`.

@@ -13,7 +13,8 @@ import { moduleDef } from "@/core/opportunities/modules";
 import { isModuleId } from "@/core/opportunities/types";
 import { searchResults } from "@/services/opportunities/items";
 import { getCtx } from "@/services/request";
-import { liveAvailability } from "@/sources/opportunities/registry";
+import { liveAvailability, providersFor } from "@/sources/opportunities/registry";
+import { LiveCoverage } from "@/components/opportunities/ui";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -31,6 +32,12 @@ export default async function ModulePage({ params, searchParams }: { params: Pro
   const search = result && result.search.module === module ? result.search : null;
   const rows = search ? result!.rows : [];
   const live = liveAvailability(module);
+  const liveScope = providersFor(module, "live")
+    .map((p) => p.coverage?.())
+    .filter((c): c is string => !!c);
+  const liveSummary = providersFor(module, "live")
+    .map((p) => p.coverageSummary?.())
+    .filter((c): c is string => !!c);
   const back = `/opportunities/${module}${search ? `?search=${search.id}${view === "table" ? "&view=table" : ""}` : ""}`;
   const viewHref = (v: string) => `/opportunities/${module}?${search ? `search=${search.id}&` : ""}view=${v}`;
 
@@ -60,7 +67,7 @@ export default async function ModulePage({ params, searchParams }: { params: Pro
         </a>
       )}
       <div className={`op-search${search ? " has-results" : ""}`}>
-        <SearchForm module={module} def={def} query={(search?.query as Record<string, unknown>) ?? {}} action={searchAction.bind(null, module)} live={live} view={view} />
+        <SearchForm module={module} def={def} query={(search?.query as Record<string, unknown>) ?? {}} action={searchAction.bind(null, module)} live={live} view={view} liveScope={liveScope} liveSummary={liveSummary} />
         <section aria-labelledby="results-h" aria-live="polite">
           <h2 id="results-h" className="sr-only">
             Results
@@ -73,6 +80,7 @@ export default async function ModulePage({ params, searchParams }: { params: Pro
             <>
               {search.mode === "demo" && <DemoBanner />}
               <SearchStatus search={search} />
+              {search.mode === "live" && search.status !== "failed" && <LiveCoverage search={search} />}
               {search.status !== "failed" && (
                 <>
                   <div className="op-toolbar">
@@ -109,7 +117,7 @@ export default async function ModulePage({ params, searchParams }: { params: Pro
                   {rows.length > 0 && <p className="muted small" style={{ marginTop: 0 }}>{t("results.scoreHelp")}</p>}
                   {rows.length === 0 ? (
                     <EmptyState title={t("search.empty.title")}>
-                      <p>{t("search.empty.body")}</p>
+                      <p>{search.mode === "live" ? t("search.empty.live") : t("search.empty.body")}</p>
                     </EmptyState>
                   ) : module === "expansion" ? (
                     <>

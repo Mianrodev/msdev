@@ -144,4 +144,8 @@ export interface ProviderRun {
   warnings?: string[];
   cached?: boolean;
   ms?: number;
+  /** What the provider says this run read (coverage), shown alongside results. */
+  coverage?: string;
+  /** The provider's standing coverage statement at the time of the search. */
+  scope?: string;
 }

@@ -1,13 +1,25 @@
 /**
  * Live tenders: UK Find a Tender Service (FTS) public OCDS API.
  *
- *   https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?stages=tender
+ *   https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?updatedFrom=…&limit=100
  *
  * Keyless, read-only, published by the Cabinet Office under the Open Government Licence v3.0
- * (reuse and storage allowed with attribution). The API has no keyword search, so the app reads the
- * most recently updated tender notices (bounded number of pages) and filters them locally — the
- * search result says exactly how many notices were checked. Pages are cached for 30 minutes to
- * respect the service's rate limits.
+ * (reuse and storage allowed with attribution).
+ *
+ * Coverage — what one search actually reads:
+ *  - The API has no keyword, region or deadline search. The app reads every release (all notice
+ *    types) updated in the last OPP_FTS_LOOKBACK_DAYS days (default 3), newest first, up to
+ *    OPP_FTS_MAX_PAGES pages of 100 (default 20 = 2,000 releases), then filters locally.
+ *  - It deliberately does NOT use `stages=tender`: in October 2026 that filter returned only notices
+ *    under the old EU-derived regulations (legal basis 32014L00xx) and left out Procurement Act 2023
+ *    notices (legal basis 2023/54), which are most new UK tenders. The docs describe `stages` as a
+ *    coarse filter only.
+ *  - A contracting process is kept only if its newest release in the window is a tender, tender
+ *    update or cancellation — so a process that has moved on to award/contract isn't shown as open.
+ *  - A tender published earlier and not updated within the window is NOT seen. Notices published only
+ *    on Contracts Finder or devolved portals, and private-sector RFPs, are not included. (Procurement
+ *    Act notices marked "below threshold" do appear on Find a Tender and are included.)
+ * Pages are cached for 30 minutes to respect the service.
  */
 import { z } from "zod";
 import { parseDeadline } from "@/core/opportunities/dates";
@@ -21,9 +33,28 @@ import { ProviderError, type Provider } from "./types";
 const HOST = "www.find-tender.service.gov.uk";
 const BASE = `https://${HOST}/api/1.0/ocdsReleasePackages`;
 const PAGE_SIZE = 100;
-const MAX_PAGES = 3;
-const LOOKBACK_DAYS = 21;
 const ID = "find-a-tender";
+
+const envInt = (name: string, d: number, lo: number, hi: number) => {
+  const n = Math.round(Number(process.env[name]));
+  return Number.isFinite(n) && n >= lo && n <= hi ? n : d;
+};
+/** Days of updates read per search (1–14). */
+export const lookbackDays = () => envInt("OPP_FTS_LOOKBACK_DAYS", 3, 1, 14);
+/** Pages of 100 releases read per search (1–50). */
+export const maxPages = () => envInt("OPP_FTS_MAX_PAGES", 20, 1, 50);
+
+/** One line, always visible before a live search. */
+export function coverageSummary(): string {
+  return `Live = Find a Tender notices updated in the last ${lookbackDays()} day${lookbackDays() === 1 ? "" : "s"} only — not every open UK tender.`;
+}
+
+/** Plain statement of coverage, shown before a live search and next to its results. */
+export function coverageStatement(): string {
+  return `Find a Tender (UK public sector: Procurement Act 2023 notices, including those marked below threshold, plus older-regime notices still being updated). Each live search reads notices updated in the last ${lookbackDays()} day${lookbackDays() === 1 ? "" : "s"} (newest first, at most ${(maxPages() * PAGE_SIZE).toLocaleString("en-GB")} releases) and filters them here. Tenders published earlier and not updated since, notices published only on Contracts Finder or devolved portals (e.g. Public Contracts Scotland, Sell2Wales, eTendersNI), private-sector RFPs and other countries are not included.`;
+}
+
+const TENDER_TAGS = new Set(["tender", "tenderUpdate", "tenderAmendment", "tenderCancellation"]);
 
 /** UK NUTS level-1 codes → region names (deterministic lookup, so "Scotland" finds UKM… notices). */
 const NUTS1: Record<string, string> = {
@@ -47,58 +78,61 @@ const region = (code: string | undefined | null) => {
   return name ? `${code} (${name})` : code === "UK" ? "United Kingdom" : code;
 };
 
-const Value = z.object({ amount: z.number().optional(), currency: z.string().optional() }).partial();
+const Value = z.object({ amount: z.number().nullish(), currency: z.string().nullish() }).partial();
 const Release = z
   .object({
     ocid: z.string(),
     id: z.string(),
-    date: z.string().optional(),
-    buyer: z.object({ name: z.string().optional() }).partial().optional(),
+    date: z.string().nullish(),
+    tag: z.array(z.string()).nullish(),
+    buyer: z.object({ name: z.string().nullish() }).partial().nullish(),
     parties: z
       .array(
         z
           .object({
-            name: z.string().optional(),
-            roles: z.array(z.string()).optional(),
-            address: z.object({ region: z.string().optional(), locality: z.string().optional(), countryName: z.string().optional() }).partial().optional(),
+            name: z.string().nullish(),
+            roles: z.array(z.string()).nullish(),
+            address: z.object({ region: z.string().nullish(), locality: z.string().nullish(), countryName: z.string().nullish() }).partial().nullish(),
           })
           .partial(),
       )
-      .optional(),
+      .nullish(),
     tender: z
       .object({
-        title: z.string().optional(),
-        description: z.string().optional(),
-        status: z.string().optional(),
-        mainProcurementCategory: z.string().optional(),
-        procurementMethodDetails: z.string().optional(),
-        classification: z.object({ id: z.string().optional(), description: z.string().optional() }).partial().optional(),
+        title: z.string().nullish(),
+        description: z.string().nullish(),
+        status: z.string().nullish(),
+        mainProcurementCategory: z.string().nullish(),
+        procurementMethodDetails: z.string().nullish(),
+        classification: z.object({ id: z.string().nullish(), description: z.string().nullish() }).partial().nullish(),
         items: z
           .array(
             z
               .object({
-                additionalClassifications: z.array(z.object({ description: z.string().optional() }).partial()).optional(),
-                deliveryAddresses: z.array(z.object({ region: z.string().optional() }).partial()).optional(),
+                additionalClassifications: z.array(z.object({ description: z.string().nullish() }).partial()).nullish(),
+                deliveryAddresses: z.array(z.object({ region: z.string().nullish() }).partial()).nullish(),
               })
               .partial(),
           )
-          .optional(),
-        lots: z.array(z.object({ title: z.string().optional(), description: z.string().optional() }).partial()).optional(),
-        value: Value.optional(),
-        tenderPeriod: z.object({ endDate: z.string().optional() }).partial().optional(),
-        enquiryPeriod: z.object({ endDate: z.string().optional() }).partial().optional(),
-        submissionMethod: z.array(z.string()).optional(),
-        submissionMethodDetails: z.string().optional(),
-        eligibilityCriteria: z.string().optional(),
-        selectionCriteria: z.object({ criteria: z.array(z.object({ type: z.string().optional(), description: z.string().optional() }).partial()).optional() }).partial().optional(),
-        documents: z.array(z.object({ documentType: z.string().optional(), title: z.string().optional(), url: z.string().optional() }).partial()).optional(),
+          .nullish(),
+        lots: z.array(z.object({ title: z.string().nullish(), description: z.string().nullish() }).partial()).nullish(),
+        value: Value.nullish(),
+        tenderPeriod: z.object({ endDate: z.string().nullish() }).partial().nullish(),
+        enquiryPeriod: z.object({ endDate: z.string().nullish() }).partial().nullish(),
+        submissionMethod: z.array(z.string()).nullish(),
+        submissionMethodDetails: z.string().nullish(),
+        eligibilityCriteria: z.string().nullish(),
+        selectionCriteria: z.object({ criteria: z.array(z.object({ type: z.string().nullish(), description: z.string().nullish() }).partial()).nullish() }).partial().nullish(),
+        documents: z.array(z.object({ documentType: z.string().nullish(), title: z.string().nullish(), url: z.string().nullish() }).partial()).nullish(),
       })
-      .partial(),
+      .partial()
+      .nullish()
+      .default({}),
   })
   .passthrough();
 type ReleaseT = z.infer<typeof Release>;
 
-const Package = z.object({ releases: z.array(z.unknown()), links: z.object({ next: z.string().optional() }).partial().optional() }).passthrough();
+const Package = z.object({ releases: z.array(z.unknown()), links: z.object({ next: z.string().nullish() }).partial().nullish() }).passthrough();
 
 const uniq = (xs: (string | null | undefined)[]) => [...new Set(xs.map((x) => x?.trim()).filter((x): x is string => !!x))];
 
@@ -128,8 +162,10 @@ export function normalizeRelease(r: ReleaseT, now: Date): NormalizedItem {
   const deadline = parseDeadline(deadlineRaw);
   const clarRaw = t.enquiryPeriod?.endDate ?? null;
   const clar = parseDeadline(clarRaw);
+  // A published amount of 0 (or less) is a placeholder, not a budget — treat it as not stated.
+  const zeroValue = typeof t.value?.amount === "number" && t.value.amount <= 0;
   const money: Money | null =
-    typeof t.value?.amount === "number" ? { raw: `${t.value.amount} ${t.value.currency ?? ""}`.trim(), currency: t.value.currency ?? null, min: t.value.amount, max: t.value.amount, qualifier: "exact" } : null;
+    typeof t.value?.amount === "number" && t.value.amount > 0 ? { raw: `${t.value.amount} ${t.value.currency ?? ""}`.trim(), currency: t.value.currency ?? null, min: t.value.amount, max: t.value.amount, qualifier: "exact" } : null;
   const eligibility = uniq([t.eligibilityCriteria, ...(t.selectionCriteria?.criteria ?? []).map((c) => (c.description ? `${c.type ? `${c.type}: ` : ""}${c.description}` : null))]);
   const docs = (t.documents ?? []).filter((d) => d.url && /^https:\/\//i.test(d.url));
   const scope = uniq((t.lots ?? []).map((l) => [l.title, l.description].filter(Boolean).join(": "))).join("\n\n");
@@ -163,7 +199,9 @@ export function normalizeRelease(r: ReleaseT, now: Date): NormalizedItem {
       publishedOn: publishedAt ? known(publishedAt.slice(0, 10), ev(publishedAt), publishedAt) : unknown(),
       deadline: deadline ? known(deadline, ev(deadline.raw), deadline.raw, deadline.notes.join("; ") || undefined) : unknown("Deadline not published in the notice data"),
       clarificationDeadline: clar ? known(clar, ev(clar.raw), clar.raw, clar.notes.join("; ") || undefined) : unknown(),
-      budget: money ? known(money, ev(money.raw), money.raw, "Estimated value as published (OCDS tender.value) — not a guaranteed amount") : unknown("Budget not published"),
+      budget: money
+        ? known(money, ev(money.raw), money.raw, "Estimated value as published (OCDS tender.value) — not a guaranteed amount")
+        : unknown(zeroValue ? "Published as 0 — treated as not stated" : "Budget not published"),
       eligibility: eligibility.length ? known(eligibility, ev(eligibility.join("\n"))) : unknown("Not published in the notice data — read the full notice"),
       requiredDocuments: unknown("Not listed in the notice data — usually in the tender pack"),
       submissionMethod: submission ? known(submission, ev(submission)) : unknown("Not stated"),
@@ -172,10 +210,15 @@ export function normalizeRelease(r: ReleaseT, now: Date): NormalizedItem {
   };
 }
 
+/** Start of the update window, in whole hours (keeps the cache key stable within an hour). */
+function windowStart(now: Date): string {
+  const from = new Date(now.getTime() - lookbackDays() * 86_400_000);
+  from.setUTCMinutes(0, 0, 0);
+  return from.toISOString().slice(0, 19);
+}
+
 function firstUrl(now: Date): string {
-  const from = new Date(now.getTime() - LOOKBACK_DAYS * 86_400_000);
-  from.setUTCMinutes(0, 0, 0); // whole hours keep the cache key stable
-  const p = new URLSearchParams({ stages: "tender", limit: String(PAGE_SIZE), updatedFrom: from.toISOString().slice(0, 19) });
+  const p = new URLSearchParams({ limit: String(PAGE_SIZE), updatedFrom: windowStart(now) });
   return `${BASE}?${p}`;
 }
 
@@ -184,7 +227,9 @@ export const findATender: Provider<TenderQuery> = {
   name: "Find a Tender (UK)",
   module: "tenders",
   mode: "live",
-  description: "UK public-sector tender notices above procurement thresholds, from the Cabinet Office's Find a Tender Service OCDS API.",
+  description: "UK public-sector tender notices from the Cabinet Office's Find a Tender Service OCDS API (Procurement Act 2023 and older-regime notices).",
+  coverage: coverageStatement,
+  coverageSummary,
   homepage: "https://www.find-tender.service.gov.uk/",
   licence: "Open Government Licence v3.0",
   licenceUrl: "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
@@ -195,13 +240,16 @@ export const findATender: Provider<TenderQuery> = {
   available: () => (process.env.OPP_LIVE_FIND_A_TENDER === "off" ? { ok: false, reason: "Switched off by OPP_LIVE_FIND_A_TENDER=off" } : { ok: true }),
   search: async (_q, io) => {
     const warnings: string[] = [];
-    const releases = new Map<string, ReleaseT>();
+    // Newest release per contracting process, whatever its type.
+    const newest = new Map<string, ReleaseT>();
     let url: string | undefined = firstUrl(io.now);
     let pages = 0;
+    let read = 0;
     let invalid = 0;
     let allCached = true;
-    while (url && pages < MAX_PAGES) {
-      const cacheKey = `opp:fts:${url}`;
+    const limit = maxPages();
+    while (url && pages < limit) {
+      const cacheKey = `opp:fts:v2:${url}`;
       let body = await io.cache.get(cacheKey, 30 * 60_000);
       if (!body) {
         allCached = false;
@@ -211,20 +259,28 @@ export const findATender: Provider<TenderQuery> = {
       const pkg = Package.safeParse(body);
       if (!pkg.success) throw new ProviderError("Find a Tender sent data in an unexpected format.");
       for (const raw of pkg.data.releases) {
+        read++;
         const r = Release.safeParse(raw);
         if (!r.success) {
           invalid++;
           continue;
         }
-        const prev = releases.get(r.data.ocid);
-        if (!prev || (r.data.date ?? "") > (prev.date ?? "")) releases.set(r.data.ocid, r.data);
+        const prev = newest.get(r.data.ocid);
+        if (!prev || (r.data.date ?? "") > (prev.date ?? "")) newest.set(r.data.ocid, r.data);
       }
       pages++;
-      const next: string | undefined = pkg.data.links?.next;
+      const next = pkg.data.links?.next ?? undefined;
       url = next && next.startsWith(`https://${HOST}/`) ? next : undefined;
     }
-    if (url) warnings.push(`Checked the ${releases.size} most recently updated tender notices (last ${LOOKBACK_DAYS} days, ${pages} pages). Older or later notices weren't read — results may be incomplete.`);
-    if (invalid) warnings.push(`${invalid} notice${invalid > 1 ? "s" : ""} had an unexpected format and were skipped.`);
-    return { items: [...releases.values()].map((r) => normalizeRelease(r, io.now)), warnings, cached: allCached };
+    const tenders = [...newest.values()].filter((r) => (r.tag ?? []).some((t) => TENDER_TAGS.has(t)));
+    const movedOn = [...newest.values()].length - tenders.length;
+    const capped = !!url;
+    if (capped)
+      warnings.push(
+        `Stopped after ${read.toLocaleString("en-GB")} releases (${pages} pages, the per-search limit) — older notices in the ${lookbackDays()}-day window weren't read, so results are incomplete.`,
+      );
+    if (invalid) warnings.push(`${invalid} release${invalid > 1 ? "s" : ""} had an unexpected format and were skipped.`);
+    const coverage = `Read ${read.toLocaleString("en-GB")} releases updated since ${windowStart(io.now).replace("T", " ").slice(0, 16)} UTC${capped ? " (stopped at the page limit)" : " (the whole window)"}; ${tenders.length} were open-stage tender notices, ${movedOn} processes were at another stage (planning, award or contract) and were left out.`;
+    return { items: tenders.map((r) => normalizeRelease(r, io.now)), warnings, cached: allCached, coverage };
   },
 };

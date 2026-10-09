@@ -17,6 +17,8 @@ export interface ProviderResult {
   items: NormalizedItem[];
   warnings: string[];
   cached?: boolean;
+  /** What this run actually read, in plain words (e.g. "Read 1,240 releases updated since …"). */
+  coverage?: string;
 }
 
 export interface ProviderInfo {
@@ -38,6 +40,10 @@ export interface ProviderInfo {
   cacheTtlMs?: number;
   /** Plain statement of what may be stored and redistributed. */
   storagePolicy: string;
+  /** What a search with this provider can and can't see — shown before a search and with results. */
+  coverage?: () => string;
+  /** One short line of the same, always visible before a live search. */
+  coverageSummary?: () => string;
 }
 
 export interface Provider<Q = Record<string, unknown>> extends ProviderInfo {

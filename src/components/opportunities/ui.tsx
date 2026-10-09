@@ -212,6 +212,25 @@ export function EmptyState({ title, children, icon = "search" }: { title: string
   );
 }
 
+/** What a live search actually read — always shown with live results, including when there are none. */
+export function LiveCoverage({ search }: { search: OppSearchRow }) {
+  const runs = (search.providers as ProviderRun[]).filter((r) => r.ok && (r.coverage || r.scope));
+  if (!runs.length) return null;
+  return (
+    <Banner tone="info" title="Coverage of this live search">
+      {runs.map((r) => (
+        <div key={r.provider}>
+          {r.coverage && <p style={{ margin: ".2rem 0" }}>{r.coverage}</p>}
+          {r.scope && <p className="small" style={{ margin: ".2rem 0" }}>{r.scope}</p>}
+        </div>
+      ))}
+      <p className="small" style={{ margin: ".2rem 0" }}>
+        Results are matches among what was read. Fewer or no results does not mean fewer or no opportunities exist.
+      </p>
+    </Banner>
+  );
+}
+
 /** What happened in a search: complete, partial (some sources failed or warned) or failed. */
 export function SearchStatus({ search }: { search: OppSearchRow }) {
   const runs = search.providers as ProviderRun[];

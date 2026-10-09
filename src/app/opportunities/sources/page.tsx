@@ -8,6 +8,7 @@ import { LIMITS } from "@/services/opportunities/usage";
 export const dynamic = "force-dynamic";
 
 export default function SourcesPage() {
+  const scopes = allProviders().filter((p) => p.coverage);
   const { mod } = copyFor();
   const providers = allProviders();
   const ai = aiEnrichmentStatus();
@@ -70,11 +71,23 @@ export default function SourcesPage() {
           </div>
         </section>
       ))}
+      {scopes.length > 0 && (
+        <section className="op-panel">
+          <h2>Live coverage</h2>
+          {scopes.map((p) => (
+            <p key={p.id}>{p.coverage!()}</p>
+          ))}
+          <p className="muted small">A live search that finds nothing means nothing matched among the records it read — not that nothing exists.</p>
+        </section>
+      )}
       <section className="op-panel">
         <h2>AI enrichment and usage limits</h2>
         <ul>
           <li>
-            AI summaries: {ai.enabled ? `on (${ai.model})` : `off — ${ai.reason}`} Summaries are optional, made on request for one record at a time, schema-validated, and always labelled.
+            AI summaries: {ai.enabled ? "on" : `off — ${ai.reason}`} Summaries are optional, made on request for one record at a time, schema-validated, and always labelled.
+          </li>
+          <li>
+            AI model: <code>{ai.model}</code> · automatic fallback to another model: <strong>{ai.fallbacks}</strong> · per request: up to {ai.maxInputChars.toLocaleString("en-GB")} characters in, {ai.maxOutputTokens.toLocaleString("en-GB")} tokens out (low effort)
           </li>
           <li>Searches per minute per workspace: {LIMITS.searchesPerMinute()}</li>
           <li>Live searches per day per workspace: {LIMITS.liveSearchesPerDay()}</li>

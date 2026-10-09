@@ -140,10 +140,10 @@ export async function runSearch(ctx: Ctx, module: ModuleId, raw: Raw, deps: Sear
         const ok = res.items.filter((it) => it.mode === mode && it.module === module);
         if (ok.length !== res.items.length) warnings.push(`${p.name}: ${res.items.length - ok.length} record(s) of the wrong kind were dropped.`);
         found.push(...ok);
-        runs.push({ provider: p.id, name: p.name, ok: true, count: ok.length, warnings: res.warnings, cached: res.cached, ms: Date.now() - t0 });
+        runs.push({ provider: p.id, name: p.name, ok: true, count: ok.length, warnings: res.warnings, cached: res.cached, ms: Date.now() - t0, coverage: res.coverage, scope: p.coverage?.() });
         warnings.push(...res.warnings.map((w) => `${p.name}: ${w}`));
       } catch (e) {
-        runs.push({ provider: p.id, name: p.name, ok: false, count: 0, error: plainError(e), ms: Date.now() - t0 });
+        runs.push({ provider: p.id, name: p.name, ok: false, count: 0, error: plainError(e), ms: Date.now() - t0, scope: p.coverage?.() });
       }
     }),
   );

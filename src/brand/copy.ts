@@ -17,6 +17,8 @@ export const DEFAULT_COPY = {
   "search.pending": "Searching sources…",
   "search.empty.title": "No matches",
   "search.empty.body": "Nothing matched every filter. Try fewer keywords, a wider area or a longer deadline range.",
+  "search.empty.live":
+    "None of the notices this search read matched your filters. That is not evidence that no relevant opportunities exist: live search only reads a recent window of one source (see coverage above). Check the source directly or widen your filters.",
   "search.start.title": "Run a search to see results",
   "search.start.body": "Fill in what you're looking for and press Search. Demo mode works without any accounts or keys.",
   "results.scoreHelp": "Scores compare these results with each other using only the facts that were available. They are research aids, not predictions.",

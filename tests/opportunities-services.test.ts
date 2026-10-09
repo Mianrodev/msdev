@@ -267,6 +267,7 @@ const SAMPLE_RELEASE = {
   ocid: "ocds-test-000001",
   id: "000001-2026",
   date: "2026-10-01T09:00:00+01:00",
+  tag: ["tender"],
   buyer: { name: "Example Borough Council" },
   parties: [{ name: "Example Borough Council", roles: ["buyer"], address: { region: "UKM75", countryName: "United Kingdom" } }],
   tender: {
@@ -296,25 +297,69 @@ describe("Find a Tender (live) normalisation", () => {
     expect(it.fields.eligibility.value).toEqual(["suitability: Cyber Essentials required."]);
     expect(it.fields.buyer.evidence[0]).toMatchObject({ provider: "find-a-tender", publishedAt: "2026-10-01T09:00:00+01:00", retrievedAt: NOW.toISOString() });
     expect(findATender.attribution).toMatch(/Open Government Licence/);
+    const zero = normalizeRelease({ ...SAMPLE_RELEASE, tender: { ...SAMPLE_RELEASE.tender, value: { amount: 0, currency: "GBP" } } }, NOW);
+    expect(zero.fields.budget).toMatchObject({ state: "unknown", note: expect.stringMatching(/Published as 0/) });
   });
 
-  it("reads bounded pages through the cache and warns when results may be incomplete", async () => {
+  it("reads every notice type (no stages filter), keeps only processes still at tender stage, caps pages, and caches", async () => {
     let fetched = 0;
+    const urls: string[] = [];
     const store = new Map<string, unknown>();
-    const page = (n: number) => ({ releases: [{ ...SAMPLE_RELEASE, ocid: `ocds-${n}`, id: `${n}-2026` }], links: { next: `https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=${n + 1}` } });
+    const legacy = { ...SAMPLE_RELEASE, tender: { ...SAMPLE_RELEASE.tender, legalBasis: { id: "32014L0024" } } };
+    const pa2023 = { ...SAMPLE_RELEASE, tender: { ...SAMPLE_RELEASE.tender, legalBasis: { id: "2023/54", scheme: "UKPGA" } } };
+    const page = (n: number) => ({
+      releases: [
+        { ...pa2023, ocid: `ocds-pa-${n}`, id: `pa-${n}` },
+        { ...legacy, ocid: `ocds-legacy-${n}`, id: `lg-${n}` },
+        // A process whose newest release is an award: must not be shown as open.
+        { ...pa2023, ocid: `ocds-awarded-${n}`, id: `aw-${n}`, date: "2026-10-05T09:00:00Z", tag: ["award", "contract"] },
+        { ...pa2023, ocid: `ocds-awarded-${n}`, id: `aw-old-${n}`, date: "2026-09-25T09:00:00Z", tag: ["tender"] },
+        { ...pa2023, ocid: `ocds-plan-${n}`, id: `pl-${n}`, tag: ["planning"] },
+        // Real notices carry nulls (e.g. lot descriptions); they must not be dropped as malformed.
+        { ...pa2023, ocid: `ocds-null-${n}`, id: `nl-${n}`, tender: { ...pa2023.tender, lots: [{ title: "Lot 1", description: null }], value: null } },
+      ],
+      links: { next: `https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=${n + 1}` },
+    });
     const io = {
       now: NOW,
-      getJson: async () => page(++fetched),
+      getJson: async (u: string) => {
+        urls.push(u);
+        return page(++fetched);
+      },
       cache: { get: async (k: string) => store.get(k) ?? null, set: async (k: string, v: unknown) => void store.set(k, v) },
     };
-    const res = await findATender.search(tenderQuery.parse({ mode: "live" }), io);
-    expect(fetched).toBe(3);
-    expect(res.items).toHaveLength(3);
-    expect(res.warnings.join(" ")).toMatch(/results may be incomplete/);
-    fetched = 0;
-    const again = await findATender.search(tenderQuery.parse({ mode: "live" }), io);
-    expect(fetched).toBe(0);
-    expect(again.cached).toBe(true);
+    process.env.OPP_FTS_MAX_PAGES = "3";
+    try {
+      const res = await findATender.search(tenderQuery.parse({ mode: "live" }), io);
+      expect(urls[0]).not.toMatch(/stages=/);
+      expect(decodeURIComponent(urls[0])).toMatch(/updatedFrom=2026-10-06T10:00:00/); // default 3-day window
+      expect(fetched).toBe(3);
+      const ids = res.items.map((i) => i.fields.reference.value);
+      expect(ids).toEqual(expect.arrayContaining(["pa-1", "lg-1", "pa-3", "lg-3", "nl-1"]));
+      expect(ids.some((x) => String(x).startsWith("aw"))).toBe(false);
+      expect(ids.some((x) => String(x).startsWith("pl"))).toBe(false);
+      expect(res.items).toHaveLength(9);
+      expect(res.warnings.join(" ")).not.toMatch(/unexpected format/);
+      expect(res.warnings.join(" ")).toMatch(/per-search limit.*incomplete/);
+      expect(res.coverage).toMatch(/Read 18 releases updated since 2026-10-06 10:00 UTC \(stopped at the page limit\); 9 were open-stage tender notices/);
+      expect(findATender.coverage!()).toMatch(/last 3 days.*at most 300 releases.*not included/);
+      fetched = 0;
+      const again = await findATender.search(tenderQuery.parse({ mode: "live" }), io);
+      expect(fetched).toBe(0);
+      expect(again.cached).toBe(true);
+    } finally {
+      delete process.env.OPP_FTS_MAX_PAGES;
+    }
+  });
+
+  it("an empty live result is recorded with its coverage, so the UI never presents it as 'nothing exists'", async () => {
+    const ctx = await testCtx();
+    const live = { ...fakeLive([]), search: async () => ({ items: [], warnings: [], coverage: "Read 900 releases updated since …" }), coverage: () => "Scope statement" };
+    const out = await runSearch(ctx, "tenders", { mode: "live" }, { now: NOW, providers: [live] });
+    expect(out).toMatchObject({ status: "complete", resultCount: 0 });
+    const run = (await searchResults(ctx, out.searchId))!.search.providers[0] as { coverage: string; scope: string };
+    expect(run.coverage).toMatch(/Read 900 releases/);
+    expect(run.scope).toBe("Scope statement");
   });
 });
 
@@ -335,5 +380,36 @@ describe("AI enrichment guard", () => {
       beta: { messages: { parse: async () => ({ stop_reason: "end_turn", model: "test-model", parsed_output: { summary: "A website audit for a council.", keyPoints: ["WCAG 2.2"], caveats: [] } }) } },
     } as unknown as Parameters<typeof summarizeRecord>[1];
     expect(await summarizeRecord("Title: Website audit WCAG 2.2", good)).toMatchObject({ ok: true, model: "test-model" });
+  });
+
+  it("sends no fallback models unless the administrator configures them, and bounds output tokens (mocked client — no real API call)", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const spy = {
+      beta: {
+        messages: {
+          parse: async (params: Record<string, unknown>) => {
+            calls.push(params);
+            return { stop_reason: "end_turn", model: "test-model", parsed_output: { summary: "A council website audit.", keyPoints: [], caveats: [] } };
+          },
+        },
+      },
+    } as unknown as Parameters<typeof summarizeRecord>[1];
+    delete process.env.OPP_AI_FALLBACKS;
+    delete process.env.OPP_AI_MAX_TOKENS;
+    await summarizeRecord("Title: Website audit", spy);
+    expect(calls[0]).not.toHaveProperty("fallbacks");
+    expect(calls[0]).not.toHaveProperty("betas");
+    expect(calls[0]).toMatchObject({ model: "claude-opus-5-5", max_tokens: 4000 });
+    process.env.OPP_AI_FALLBACKS = "default";
+    process.env.OPP_AI_MAX_TOKENS = "2000";
+    await summarizeRecord("Title: Website audit", spy);
+    expect(calls[1]).toMatchObject({ fallbacks: "default", betas: ["server-side-fallback-2026-07-01"], max_tokens: 2000 });
+    process.env.OPP_AI_FALLBACKS = "claude-sonnet-5-5, not a model";
+    await summarizeRecord("Title: Website audit", spy);
+    expect(calls[2]).toMatchObject({ fallbacks: [{ model: "claude-sonnet-5-5" }], betas: ["server-side-fallback-2026-06-01"] });
+    delete process.env.OPP_AI_FALLBACKS;
+    delete process.env.OPP_AI_MAX_TOKENS;
+    const { aiEnrichmentStatus } = await import("@/sources/opportunities/ai-enricher");
+    expect(aiEnrichmentStatus()).toMatchObject({ enabled: false, fallbacks: "off", maxOutputTokens: 4000 });
   });
 });
