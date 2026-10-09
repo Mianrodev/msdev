@@ -16,6 +16,17 @@ It runs online (Vercel + a free Neon Postgres database) or on a computer.
 anything or contacts anyone. You approve and send outreach yourself; the app
 only records that you did.
 
+## Opportunity workspace
+
+**Opportunities** (`/opportunities`) is a separate discovery product inside the app with four modules:
+Tenders & RFPs, Sponsors, Suppliers and Locations. Each has search, ranked results with explained scores,
+evidence-backed detail pages, saved lists, notes, statuses, comparison and CSV export. All four work in a
+clearly labelled demo mode out of the box; UK tenders also search live (Find a Tender, Open Government
+Licence). Branding is configurable per deployment (`BRAND`), with a component preview at `/design`.
+
+- Setup, architecture, providers, security and per-customer deployment: [`docs/OPPORTUNITIES.md`](docs/OPPORTUNITIES.md)
+- Designer handoff (tokens, components, brands, copy): [`docs/DESIGNERS.md`](docs/DESIGNERS.md)
+
 ## Put it online (Vercel + free Neon database)
 
 1. In Vercel: **Add New… → Project**, pick this GitHub repository, then **Deploy**.

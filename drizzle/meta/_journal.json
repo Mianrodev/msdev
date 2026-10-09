@@ -29,6 +29,13 @@
       "when": 1790810680848,
       "tag": "0003_source_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791571239684,
+      "tag": "0004_opportunities",
+      "breakpoints": true
     }
   ]
 }

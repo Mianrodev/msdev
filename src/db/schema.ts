@@ -316,3 +316,134 @@ export type HistoryRow = typeof history.$inferSelect;
 
 export type UserRow = typeof users.$inferSelect;
 export type InviteRow = typeof invites.$inferSelect;
+
+// ---------------------------------------------------------------- opportunity discovery
+// Tenders, sponsors, suppliers and expansion areas. Every row is scoped by workspace; demo and live
+// records never share a row (mode is part of the identity).
+
+/** One search run: what was asked, which providers answered, and whether the result is complete. */
+export const oppSearches = pgTable(
+  "opp_searches",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: workspaceId(),
+    module: text("module").notNull(),
+    mode: text("mode", { enum: ["demo", "live"] }).notNull(),
+    query: jsonb("query").$type<Record<string, unknown>>().notNull(),
+    summary: text("summary").notNull().default(""),
+    status: text("status", { enum: ["complete", "partial", "failed"] }).notNull(),
+    providers: jsonb("providers").$type<unknown[]>().notNull().default([]),
+    warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
+    error: text("error"),
+    resultCount: integer("result_count").notNull().default(0),
+    actor: text("actor").notNull(),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at").notNull(),
+  },
+  (t) => [index("opp_searches_ws_module").on(t.workspaceId, t.module, t.startedAt)],
+);
+
+/** One external record (normalised), with field-level evidence and the user's tracking state. */
+export const oppItems = pgTable(
+  "opp_items",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: workspaceId(),
+    module: text("module").notNull(),
+    mode: text("mode", { enum: ["demo", "live"] }).notNull(),
+    dedupKey: text("dedup_key").notNull(),
+    provider: text("provider").notNull(),
+    title: text("title").notNull(),
+    subtitle: text("subtitle"),
+    sourceUrl: text("source_url"),
+    retrievedAt: text("retrieved_at").notNull(),
+    publishedAt: text("published_at"),
+    fields: jsonb("fields").$type<Record<string, unknown>>().notNull().default({}),
+    links: jsonb("links").$type<unknown[]>().notNull().default([]),
+    /** Optional AI/automatic summary, always labelled with how it was made. */
+    enrichment: jsonb("enrichment").$type<Record<string, unknown> | null>(),
+    lastMatch: jsonb("last_match").$type<Record<string, unknown> | null>(),
+    lastSearchId: text("last_search_id"),
+    savedAt: text("saved_at"),
+    status: text("status"),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("opp_items_ws_identity").on(t.workspaceId, t.module, t.mode, t.dedupKey), index("opp_items_ws_saved").on(t.workspaceId, t.module, t.savedAt)],
+);
+
+/** Ranked results of one search, with the score breakdown as it was computed then. */
+export const oppResults = pgTable(
+  "opp_results",
+  {
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    workspaceId: workspaceId(),
+    searchId: text("search_id")
+      .notNull()
+      .references(() => oppSearches.id),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => oppItems.id),
+    rank: integer("rank").notNull(),
+    match: jsonb("match").$type<Record<string, unknown>>().notNull(),
+  },
+  (t) => [index("opp_results_search").on(t.searchId, t.rank)],
+);
+
+export const oppLists = pgTable(
+  "opp_lists",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: workspaceId(),
+    module: text("module").notNull(),
+    name: text("name").notNull(),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("opp_lists_ws_name").on(t.workspaceId, t.module, t.name)],
+);
+
+export const oppListItems = pgTable(
+  "opp_list_items",
+  {
+    workspaceId: workspaceId(),
+    listId: text("list_id")
+      .notNull()
+      .references(() => oppLists.id),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => oppItems.id),
+    addedAt: text("added_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("opp_list_items_uq").on(t.listId, t.itemId)],
+);
+
+export const oppNotes = pgTable(
+  "opp_notes",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: workspaceId(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => oppItems.id),
+    body: text("body").notNull(),
+    actor: text("actor").notNull(),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("opp_notes_item").on(t.workspaceId, t.itemId)],
+);
+
+/** Usage counters per workspace and window (rate limits and live-provider caps). */
+export const oppUsage = pgTable(
+  "opp_usage",
+  {
+    workspaceId: workspaceId(),
+    bucket: text("bucket").notNull(),
+    count: integer("count").notNull().default(0),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("opp_usage_uq").on(t.workspaceId, t.bucket)],
+);
+
+export type OppSearchRow = typeof oppSearches.$inferSelect;
+export type OppItemRow = typeof oppItems.$inferSelect;
+export type OppListRow = typeof oppLists.$inferSelect;
+export type OppNoteRow = typeof oppNotes.$inferSelect;

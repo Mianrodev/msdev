@@ -5,14 +5,19 @@ import { logoutAction } from "./login/actions";
 import { NavLinks } from "@/components/client";
 import { backToMySpaceAction } from "./team/actions";
 import { currentSession } from "@/services/request";
+import { activeBrand, brandCss } from "@/brand/brands";
 
-export const metadata: Metadata = {
-  title: "Prospect CRM",
-  description: "Track leads from first find to ready-to-apply, with a weekly check that does the sorting for you.",
-};
+export function generateMetadata(): Metadata {
+  const b = activeBrand();
+  return {
+    title: b.appName,
+    description: b.id === "default" ? "Track leads from first find to ready-to-apply, with a weekly check that does the sorting for you." : b.tagline,
+  };
+}
 
 const LINKS = [
   { href: "/", label: "Home" },
+  { href: "/opportunities", label: "Opportunities" },
   { href: "/discover", label: "Find leads" },
   { href: "/records?list=ready", label: "Leads" },
   { href: "/answers", label: "My answers" },
@@ -25,15 +30,23 @@ const LINKS = [
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const session = await currentSession();
+  const brand = activeBrand();
   const signedIn = !!session;
   const links = session?.user.role === "owner" ? [...LINKS.slice(0, -1), { href: "/team", label: "Team" }, LINKS[LINKS.length - 1]] : LINKS;
   return (
     <html lang="en">
+      <head>
+        {/* Brand tokens (src/brand/brands.ts) — the default brand reproduces the original look. */}
+        <style dangerouslySetInnerHTML={{ __html: brandCss(brand) }} />
+      </head>
       <body>
+        <a href="#main" className="skip-link">
+          Skip to content
+        </a>
         <div className="shell">
           <nav className="topnav" aria-label="Main">
             <Link href="/" className="brand">
-              Prospect CRM
+              {brand.appName}
             </Link>
             {signedIn && (
               <>
@@ -60,7 +73,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               </form>
             </div>
           )}
-          <main>{children}</main>
+          <main id="main">{children}</main>
         </div>
       </body>
     </html>

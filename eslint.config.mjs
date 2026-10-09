@@ -24,15 +24,16 @@ const config = [
   },
   {
     files: ["src/**/*.{ts,tsx}"],
-    ignores: ["src/sources/job-boards.ts"],
+    ignores: ["src/sources/job-boards.ts", "src/sources/opportunities/safe-fetch.ts", "src/sources/opportunities/ai-enricher.ts"],
     rules: {
       "no-restricted-globals": ["error", { name: "fetch", message: OUTBOUND }, { name: "XMLHttpRequest", message: OUTBOUND }, { name: "WebSocket", message: OUTBOUND }],
       "no-restricted-imports": [
         "error",
         {
-          paths: ["http", "https", "net", "tls", "dgram", "node:http", "node:https", "node:net", "node:tls", "node:dgram", "nodemailer", "axios", "undici", "node-fetch", "got"].map(
+          paths: ["http", "https", "net", "tls", "dgram", "node:http", "node:https", "node:net", "node:tls", "node:dgram", "nodemailer", "axios", "undici", "node-fetch", "got", "@anthropic-ai/sdk"].map(
             (name) => ({ name, message: OUTBOUND }),
           ),
+          patterns: [{ group: ["@anthropic-ai/sdk/*"], message: OUTBOUND }],
         },
       ],
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", destructuredArrayIgnorePattern: "^_" }],
