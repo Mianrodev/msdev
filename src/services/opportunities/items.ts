@@ -148,7 +148,7 @@ export async function listLists(ctx: Ctx, module?: ModuleId): Promise<(OppListRo
   const conds: SQL[] = [eq(oppLists.workspaceId, ctx.workspaceId)];
   if (module) conds.push(eq(oppLists.module, module));
   const rows = await ctx.db
-    .select({ list: oppLists, count: sql<number>`count(${oppListItems.itemId})::int` })
+    .select({ list: oppLists, count: sql<number>`count(${oppListItems.itemId})` })
     .from(oppLists)
     .leftJoin(oppListItems, eq(oppListItems.listId, oppLists.id))
     .where(and(...conds))
@@ -212,7 +212,7 @@ export async function listSaved(ctx: Ctx, f: SavedFilter = {}): Promise<OppItemR
 
 export async function savedCounts(ctx: Ctx): Promise<Record<string, number>> {
   const rows = await ctx.db
-    .select({ module: oppItems.module, n: sql<number>`count(*)::int` })
+    .select({ module: oppItems.module, n: sql<number>`count(*)` })
     .from(oppItems)
     .where(and(eq(oppItems.workspaceId, ctx.workspaceId), isNotNull(oppItems.savedAt)))
     .groupBy(oppItems.module);

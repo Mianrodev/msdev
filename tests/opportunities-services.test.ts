@@ -248,6 +248,11 @@ describe("network safety", () => {
   it("blocks hosts that resolve to private addresses and redirects to other hosts; retries are bounded", async () => {
     const allow = ["api.example.org"];
     await expect(safeGetText("https://api.example.org/x", { allowHosts: allow, lookup: async () => [{ address: "10.0.0.5" }], fetchImpl: (async () => new Response("{}")) as typeof fetch })).rejects.toThrow(/private/);
+    // Workers' resolver mixes CNAME targets into the answers: hostnames are ignored, every IP is still checked.
+    const cnames = (ip: string) => async () => [{ address: "alias.example.org." }, { address: ip }];
+    await expect(safeGetText("https://api.example.org/x", { allowHosts: allow, lookup: cnames("93.184.216.34"), fetchImpl: (async () => new Response("ok")) as typeof fetch })).resolves.toMatchObject({ text: "ok" });
+    await expect(safeGetText("https://api.example.org/x", { allowHosts: allow, lookup: cnames("10.0.0.5"), fetchImpl: (async () => new Response("ok")) as typeof fetch })).rejects.toThrow(/private/);
+    await expect(safeGetText("https://api.example.org/x", { allowHosts: allow, lookup: async () => [{ address: "alias.example.org." }], fetchImpl: (async () => new Response("ok")) as typeof fetch })).rejects.toThrow(/private/);
     const redirect = (async () => new Response(null, { status: 302, headers: { location: "https://metadata.internal/" } })) as typeof fetch;
     await expect(safeGetText("https://api.example.org/x", { allowHosts: allow, lookup: async () => [{ address: "93.184.216.34" }], fetchImpl: redirect })).rejects.toThrow(/not an allowed host/);
     let calls = 0;

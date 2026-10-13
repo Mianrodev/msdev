@@ -16,6 +16,7 @@ import { moduleDef } from "@/core/opportunities/modules";
 import { firstIssue } from "@/core/opportunities/query";
 import { byScore } from "@/core/opportunities/scoring";
 import type { DataMode, MatchResult, ModuleId, NormalizedItem, ProviderRun, SearchStatus } from "@/core/opportunities/types";
+import { chunkRows } from "@/db/client";
 import { oppItems, oppResults, oppSearches, type OppSearchRow } from "@/db/schema";
 import { safeGetJson } from "@/sources/opportunities/safe-fetch";
 import { liveAvailability, providersFor } from "@/sources/opportunities/registry";
@@ -164,9 +165,8 @@ export async function runSearch(ctx: Ctx, module: ModuleId, raw: Raw, deps: Sear
   const status: SearchStatus = failed.length || runs.some((r) => r.warnings?.length) ? "partial" : "complete";
   const out = await record(status, runs, warnings, null, ranked.length);
   if (ranked.length) {
-    await ctx.db.insert(oppResults).values(
-      ranked.map((r, i) => ({ workspaceId: ctx.workspaceId, searchId, itemId: ids.get(r.item.key)!, rank: i + 1, match: r.match as unknown as Record<string, unknown> })),
-    );
+    const rows = ranked.map((r, i) => ({ workspaceId: ctx.workspaceId, searchId, itemId: ids.get(r.item.key)!, rank: i + 1, match: r.match as unknown as Record<string, unknown> }));
+    for (const chunk of chunkRows(rows)) await ctx.db.insert(oppResults).values(chunk);
   }
   return out;
 }
@@ -175,12 +175,7 @@ export async function runSearch(ctx: Ctx, module: ModuleId, raw: Raw, deps: Sear
 async function storeItems(ctx: Ctx, ranked: { item: NormalizedItem; match: MatchResult }[], searchId: string): Promise<Map<string, string>> {
   const ids = new Map<string, string>();
   const nowIso = new Date().toISOString();
-  for (let i = 0; i < ranked.length; i += 200) {
-    const chunk = ranked.slice(i, i + 200);
-    const rows = await ctx.db
-      .insert(oppItems)
-      .values(
-        chunk.map(({ item, match }) => ({
+  const values = ranked.map(({ item, match }) => ({
           id: randomUUID(),
           workspaceId: ctx.workspaceId,
           module: item.module,
@@ -195,9 +190,13 @@ async function storeItems(ctx: Ctx, ranked: { item: NormalizedItem; match: Match
           fields: item.fields as unknown as Record<string, unknown>,
           links: item.links,
           lastMatch: match as unknown as Record<string, unknown>,
-          lastSearchId: searchId,
-        })),
-      )
+    lastSearchId: searchId,
+  }));
+  // One value in the update clause (updatedAt) also counts towards D1's bound-value limit.
+  for (const chunk of chunkRows(values, 1)) {
+    const rows = await ctx.db
+      .insert(oppItems)
+      .values(chunk)
       .onConflictDoUpdate({
         target: [oppItems.workspaceId, oppItems.module, oppItems.mode, oppItems.dedupKey],
         set: {

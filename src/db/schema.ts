@@ -1,21 +1,21 @@
 /**
- * Storage schema (Postgres via Drizzle). Runs on any Postgres (Neon, Supabase, …) in production and on
- * PGlite (embedded Postgres, no install) for local development and tests.
+ * Storage schema (SQLite via Drizzle). Runs on Cloudflare D1 in production and in local development
+ * (Wrangler's local D1), and on in-memory SQLite (libsql) in tests.
  *
  * Every business table carries `workspace_id`, and every query is scoped by it. One deployment serves
  * one organisation; its team shares the "default" workspace.
  */
 import { sql } from "drizzle-orm";
-import { index, integer, jsonb, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /** ISO-8601 UTC timestamp text, matching what the app writes (new Date().toISOString()). */
-const now = sql`(to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))`;
+const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 const timestamps = {
   createdAt: text("created_at").notNull().default(now),
   updatedAt: text("updated_at").notNull().default(now),
 };
 
-export const workspaces = pgTable("workspaces", {
+export const workspaces = sqliteTable("workspaces", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   ...timestamps,
@@ -30,7 +30,7 @@ const workspaceId = () =>
  * People who can sign in. The owner's credentials come from the OWNER_EMAIL / OWNER_PASSWORD
  * environment variables (their row only records them); members are added by the owner.
  */
-export const users = pgTable(
+export const users = sqliteTable(
   "users",
   {
     id: text("id").primaryKey(),
@@ -51,22 +51,22 @@ export const users = pgTable(
 );
 
 /** Workspace and app settings (company profile, session secret, sign-in throttle counters). */
-export const settings = pgTable(
+export const settings = sqliteTable(
   "settings",
   {
     workspaceId: workspaceId(),
     key: text("key").notNull(),
-    value: jsonb("value").$type<unknown>(),
+    value: text("value", { mode: "json" }).$type<unknown>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("settings_ws_key").on(t.workspaceId, t.key)],
 );
 
 /** Append-only activity log. UPDATE and DELETE are blocked by a trigger (migration 0001). */
-export const history = pgTable(
+export const history = sqliteTable(
   "history",
   {
-    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    id: integer("id").primaryKey({ autoIncrement: true }),
     workspaceId: workspaceId(),
     entityType: text("entity_type").notNull(),
     entityId: text("entity_id"),
@@ -75,7 +75,7 @@ export const history = pgTable(
     newStatus: text("new_status"),
     reason: text("reason"),
     actor: text("actor").notNull(),
-    detail: jsonb("detail").$type<Record<string, unknown>>(),
+    detail: text("detail", { mode: "json" }).$type<Record<string, unknown>>(),
     occurredAt: text("occurred_at").notNull().default(now),
     createdAt: text("created_at").notNull().default(now),
   },
@@ -83,10 +83,10 @@ export const history = pgTable(
 );
 
 /** Public provider data shared by every workspace (only for providers whose terms allow storage). */
-export const sourceCache = pgTable("source_cache", {
+export const sourceCache = sqliteTable("source_cache", {
   key: text("key").primaryKey(),
   fetchedAt: text("fetched_at").notNull(),
-  value: jsonb("value").$type<unknown>().notNull(),
+  value: text("value", { mode: "json" }).$type<unknown>().notNull(),
 });
 
 export type UserRow = typeof users.$inferSelect;
@@ -97,18 +97,18 @@ export type HistoryRow = typeof history.$inferSelect;
 // records never share a row (mode is part of the identity).
 
 /** One search run: what was asked, which providers answered, and whether the result is complete. */
-export const oppSearches = pgTable(
+export const oppSearches = sqliteTable(
   "opp_searches",
   {
     id: text("id").primaryKey(),
     workspaceId: workspaceId(),
     module: text("module").notNull(),
     mode: text("mode", { enum: ["demo", "live"] }).notNull(),
-    query: jsonb("query").$type<Record<string, unknown>>().notNull(),
+    query: text("query", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
     summary: text("summary").notNull().default(""),
     status: text("status", { enum: ["complete", "partial", "failed"] }).notNull(),
-    providers: jsonb("providers").$type<unknown[]>().notNull().default([]),
-    warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
+    providers: text("providers", { mode: "json" }).$type<unknown[]>().notNull().default([]),
+    warnings: text("warnings", { mode: "json" }).$type<string[]>().notNull().default([]),
     error: text("error"),
     resultCount: integer("result_count").notNull().default(0),
     actor: text("actor").notNull(),
@@ -119,7 +119,7 @@ export const oppSearches = pgTable(
 );
 
 /** One external record (normalised), with field-level evidence and the user's tracking state. */
-export const oppItems = pgTable(
+export const oppItems = sqliteTable(
   "opp_items",
   {
     id: text("id").primaryKey(),
@@ -133,11 +133,11 @@ export const oppItems = pgTable(
     sourceUrl: text("source_url"),
     retrievedAt: text("retrieved_at").notNull(),
     publishedAt: text("published_at"),
-    fields: jsonb("fields").$type<Record<string, unknown>>().notNull().default({}),
-    links: jsonb("links").$type<unknown[]>().notNull().default([]),
+    fields: text("fields", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+    links: text("links", { mode: "json" }).$type<unknown[]>().notNull().default([]),
     /** Optional AI/automatic summary, always labelled with how it was made. */
-    enrichment: jsonb("enrichment").$type<Record<string, unknown> | null>(),
-    lastMatch: jsonb("last_match").$type<Record<string, unknown> | null>(),
+    enrichment: text("enrichment", { mode: "json" }).$type<Record<string, unknown> | null>(),
+    lastMatch: text("last_match", { mode: "json" }).$type<Record<string, unknown> | null>(),
     lastSearchId: text("last_search_id"),
     savedAt: text("saved_at"),
     status: text("status"),
@@ -147,10 +147,10 @@ export const oppItems = pgTable(
 );
 
 /** Ranked results of one search, with the score breakdown as it was computed then. */
-export const oppResults = pgTable(
+export const oppResults = sqliteTable(
   "opp_results",
   {
-    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    id: integer("id").primaryKey({ autoIncrement: true }),
     workspaceId: workspaceId(),
     searchId: text("search_id")
       .notNull()
@@ -159,12 +159,12 @@ export const oppResults = pgTable(
       .notNull()
       .references(() => oppItems.id),
     rank: integer("rank").notNull(),
-    match: jsonb("match").$type<Record<string, unknown>>().notNull(),
+    match: text("match", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
   },
   (t) => [index("opp_results_search").on(t.searchId, t.rank)],
 );
 
-export const oppLists = pgTable(
+export const oppLists = sqliteTable(
   "opp_lists",
   {
     id: text("id").primaryKey(),
@@ -176,7 +176,7 @@ export const oppLists = pgTable(
   (t) => [uniqueIndex("opp_lists_ws_name").on(t.workspaceId, t.module, t.name)],
 );
 
-export const oppListItems = pgTable(
+export const oppListItems = sqliteTable(
   "opp_list_items",
   {
     workspaceId: workspaceId(),
@@ -191,7 +191,7 @@ export const oppListItems = pgTable(
   (t) => [uniqueIndex("opp_list_items_uq").on(t.listId, t.itemId)],
 );
 
-export const oppNotes = pgTable(
+export const oppNotes = sqliteTable(
   "opp_notes",
   {
     id: text("id").primaryKey(),
@@ -207,7 +207,7 @@ export const oppNotes = pgTable(
 );
 
 /** Usage counters per workspace and window (rate limits and live-provider caps). */
-export const oppUsage = pgTable(
+export const oppUsage = sqliteTable(
   "opp_usage",
   {
     workspaceId: workspaceId(),

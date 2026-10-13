@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "opportunity-desk",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-01",
+  // global_fetch_strictly_public: outbound fetch() can never reach private or internal addresses.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "opportunity-desk",
+      // Wrangler creates the database on the first deploy and fills this in for later deploys.
+      // To use one you created in the dashboard instead, put its ID here:
+      // "database_id": "…",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  // Keep variables set in the dashboard (e.g. BRAND) when deploying. Secrets are always kept.
+  "keep_vars": true,
+  "observability": { "enabled": true }
+}

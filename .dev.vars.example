@@ -1,20 +1,16 @@
-# Copy to .env.local for local development. Never commit real values.
+# Copy to .dev.vars for local development. Never commit real values.
+# In Cloudflare, set these under the Worker → Settings → Variables and Secrets (use secrets for credentials).
 
 # --- Required -----------------------------------------------------------------
-# The owner account. To reset the owner's password, change OWNER_PASSWORD and redeploy/restart
+# The owner account. To reset the owner's password, change OWNER_PASSWORD and deploy again/restart
 # (that also signs the owner out everywhere). There is no first-visit setup and no recovery code.
 OWNER_EMAIL=you@example.com
 OWNER_PASSWORD=change-me-to-12-plus-characters
 
-# --- Hosting (Vercel) ---------------------------------------------------------
-# Set automatically when you connect a Neon database in Vercel → Storage.
-# DATABASE_URL=postgres://user:password@host/db?sslmode=require
+# --- Hosting -------------------------------------------------------------------
+# The database is the D1 binding DB in wrangler.jsonc — no connection string.
 # Signing key for login cookies (otherwise one is generated and stored in the database).
 # AUTH_SECRET=
-
-# --- Local ---------------------------------------------------------------------
-# With no DATABASE_URL, an embedded Postgres stores data in this folder (gitignored).
-# PGLITE_DIR=data/pglite
 
 # --- Branding ------------------------------------------------------------------
 # default | meridian | fieldstone (see src/brand/brands.ts).

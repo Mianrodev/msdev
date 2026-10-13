@@ -26,7 +26,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
         {owner ? (
           <p>
             The owner&apos;s email and password are the <code>OWNER_EMAIL</code> and <code>OWNER_PASSWORD</code> environment variables. To
-            change or reset them, update the variables in the hosting settings (Vercel → Settings → Environment Variables) and redeploy.
+            change or reset them, update the variables in the hosting settings (Cloudflare → this Worker → Settings → Variables and Secrets) and deploy again.
             Changing them signs the owner out everywhere.
           </p>
         ) : (

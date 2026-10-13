@@ -17,7 +17,7 @@ purchased, enabled or signed up for. **None of the modules is production-ready**
    OGL v3 (UK government data), Census Bureau terms (with the required notice), Apache-2.0/CDLA (Foursquare OS
    Places / Overture). Share-alike licences (ODbL, CC BY-SA) need a legal decision before use in a resold product.
 4. **Read-at-search-time does not scale for live sources.** Every module should move to a scheduled background
-   sync into a local index (a scheduled job, e.g. Vercel Cron), so searches are fast, complete for the indexed
+   sync into a local index (a scheduled job, e.g. a Cloudflare Cron Trigger), so searches are fast, complete for the indexed
    window, and stay within provider rate limits.
 5. **No invented contacts.** Only business contact channels the organisation publishes itself, each with a source
    link. UK PECR: corporate subscribers can be emailed, but sole traders and some partnerships count as individuals
@@ -131,7 +131,7 @@ Effort is rough engineering time for one developer, excluding legal review.
 
 | # | Work | Why first | Effort | Needs from you |
 |---|---|---|---|---|
-| 1 | **Background sync framework**: provider “sync” jobs on a schedule (Vercel Cron), a local index table per module with source/licence/retrieved-at, freshness shown in UI, per-provider quotas | Every live module needs it; makes tender coverage complete and searches fast | 3–5 days | Approve cron frequency & hosting plan limits |
+| 1 | **Background sync framework**: provider “sync” jobs on a schedule (Cloudflare Cron Triggers), a local index table per module with source/licence/retrieved-at, freshness shown in UI, per-provider quotas | Every live module needs it; makes tender coverage complete and searches fast | 3–5 days | Approve cron frequency & hosting plan limits |
 | 2 | **Tenders: full Find a Tender index** (incremental `updatedFrom`, keep open notices until deadline/award) | Biggest coverage gain for an already-working module | 2–3 days | — |
 | 3 | **Expansion UK: Nomis + ONS geography** (MSOA/LSOA candidate areas, Census 2021, MYE, UK Business Counts by SIC, centroids; category→SIC mapping table) | Free, open licence, official; replaces the demo region with real areas | 5–8 days | Nomis Unique ID; decide GB-only vs UK; income source; category→SIC mapping review |
 | 4 | **Expansion US: Census API** (ACS tract/ZCTA, PEP, CBP/ZBP, TIGER; NAICS mapping) | Same model, second market | 4–6 days | Census API key; tract vs ZCTA |
@@ -153,7 +153,7 @@ Effort is rough engineering time for one developer, excluding legal review.
 
 **Decisions:**
 1. Launch geography: UK only, GB only, or UK + US.
-2. Whether a background sync on Vercel cron is acceptable (plan limits, run time), or a separate worker.
+2. Whether a background sync on a Cloudflare Cron Trigger is acceptable (CPU-time limits per run), or a Queue-driven job.
 3. Crawl policy for business websites: rate limits, robots.txt, user-agent contact, snippet length, retention, opt-out.
 4. Contact policy: only business channels published by the organisation itself; PECR handling for sole traders.
 5. Licence policy: whether share-alike sources (ODbL/OSM, CC BY-SA/Open Supply Hub, Wikipedia text) are acceptable

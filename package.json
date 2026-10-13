@@ -4,12 +4,13 @@
   "private": true,
   "description": "Opportunity discovery: tenders, sponsors, suppliers and expansion locations, with evidence behind every fact.",
   "scripts": {
-    "dev": "npm run db:migrate && next dev",
+    "dev": "npm run db:migrate:local && next dev",
     "build": "next build",
-    "vercel-build": "npm run db:migrate && next build",
-    "start": "npm run db:migrate && next start",
+    "preview": "npm run db:migrate:local && opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy && npm run db:migrate:remote",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx scripts/migrate.ts",
+    "db:migrate:local": "wrangler d1 migrations apply opportunity-desk --local",
+    "db:migrate:remote": "wrangler d1 migrations apply opportunity-desk --remote",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run"
@@ -19,24 +20,25 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
-    "@electric-sql/pglite": "^0.5.8",
+    "@opennextjs/cloudflare": "^1.20.11",
     "drizzle-orm": "^0.45.3",
-    "next": "^16.3.7",
-    "postgres": "^3.4.9",
+    "next": "^16.3.8",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "server-only": "^0.0.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261013.1",
+    "@libsql/client": "^0.18.0",
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9.39.5",
-    "eslint-config-next": "^16.3.7",
-    "tsx": "^4.23.15",
+    "eslint-config-next": "^16.3.8",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.2",
+    "wrangler": "^4.150.0"
   }
 }

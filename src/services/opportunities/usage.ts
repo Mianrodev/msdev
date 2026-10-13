@@ -29,7 +29,7 @@ export async function reserve(ctx: Ctx, bucket: string, limit: number): Promise<
     .onConflictDoUpdate({
       target: [oppUsage.workspaceId, oppUsage.bucket],
       set: { count: sql`${oppUsage.count} + 1`, updatedAt: new Date().toISOString() },
-      where: sql`${oppUsage.count} < ${limit}`,
+      setWhere: sql`${oppUsage.count} < ${limit}`,
     })
     .returning({ count: oppUsage.count });
   return rows.length === 1;

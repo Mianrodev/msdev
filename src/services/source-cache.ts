@@ -3,7 +3,7 @@
  * for a while so searches don't download the same thing twice. Holds only what sources publish —
  * nothing from anyone's workspace — and only for providers whose terms allow storage.
  */
-import { eq, sql } from "drizzle-orm";
+import { eq, lt, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { sourceCache } from "@/db/schema";
 
@@ -21,13 +21,14 @@ export async function readCacheMany<T>(db: Db, keys: string[], maxAgeMs: number)
   const out = new Map<string, T>();
   if (maxAgeMs <= 0 || !keys.length) return out;
   const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
-  for (let i = 0; i < keys.length; i += 500) {
+  // D1 binds at most 100 values per statement: 90 keys + the cutoff.
+  for (let i = 0; i < keys.length; i += 90) {
     const rows = await db
       .select()
       .from(sourceCache)
       .where(
         sql`${sourceCache.key} in (${sql.join(
-          keys.slice(i, i + 500).map((k) => sql`${k}`),
+          keys.slice(i, i + 90).map((k) => sql`${k}`),
           sql`, `,
         )}) and ${sourceCache.fetchedAt} > ${cutoff}`,
       );
@@ -47,5 +48,5 @@ export async function writeCache(db: Db, key: string, value: unknown): Promise<v
 /** Drop anything older than 7 days (no provider reuses data that long). */
 export async function pruneCache(db: Db): Promise<void> {
   const cutoff = new Date(Date.now() - 7 * 24 * HOUR).toISOString();
-  await db.execute(sql`delete from ${sourceCache} where ${sourceCache.fetchedAt} < ${cutoff}`);
+  await db.delete(sourceCache).where(lt(sourceCache.fetchedAt, cutoff));
 }

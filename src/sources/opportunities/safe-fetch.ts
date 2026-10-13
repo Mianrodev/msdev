@@ -91,7 +91,9 @@ async function assertPublicHost(host: string, lookup: Lookup) {
   } catch {
     throw new FetchError(`Couldn't find ${host}`);
   }
-  if (!addrs.length || addrs.some((a) => isPrivateAddress(a.address))) throw new UnsafeUrlError(`${host} resolves to a private or internal address`);
+  // Cloudflare Workers' resolver also lists CNAME targets (hostnames) among the answers; only the IPs count.
+  const ips = addrs.map((a) => a.address).filter((a) => isIP(a));
+  if (!ips.length || ips.some(isPrivateAddress)) throw new UnsafeUrlError(`${host} resolves to a private or internal address`);
 }
 
 /** GET a URL and return its body text. Throws FetchError / UnsafeUrlError with plain messages. */

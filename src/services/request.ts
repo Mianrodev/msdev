@@ -17,10 +17,15 @@ export interface Session {
 
 /** The signed-in person, or null (no redirect) — for the layout. */
 export async function currentSession(): Promise<Session | null> {
+  // Read the cookie first: it marks every page as per-request, so nothing touches the database at build time.
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
   const db = await getDb();
-  ready ??= ensureWorkspace(db);
+  ready ??= ensureWorkspace(db).catch((e) => {
+    ready = undefined;
+    throw e;
+  });
   await ready;
-  const user = await sessionUser(db, (await cookies()).get(SESSION_COOKIE)?.value);
+  const user = await sessionUser(db, token);
   if (!user) return null;
   return { ctx: { db, workspaceId: user.workspaceId, actor: { kind: "human", id: user.id } }, user };
 }

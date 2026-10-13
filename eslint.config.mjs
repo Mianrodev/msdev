@@ -12,7 +12,7 @@ const OUTBOUND = "Network access goes through src/sources/opportunities/safe-fet
 const config = [
   ...nextVitals,
   ...nextTs,
-  { ignores: [".next/**", "node_modules/**", "drizzle/**", "data/**", "next-env.d.ts"] },
+  { ignores: [".next/**", "node_modules/**", "drizzle/**", ".open-next/**", ".wrangler/**", "next-env.d.ts"] },
   {
     files: ["src/**/*.{ts,tsx}", "scripts/**/*.ts", "tests/**/*.ts"],
     languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },

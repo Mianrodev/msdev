@@ -151,8 +151,8 @@ export async function reserveTry(db: Db, email: string, ip: string, now = Date.n
     .values({ workspaceId: DEFAULT_WORKSPACE_ID, key: triesKey(email, ip), value: { n: 1, at: now } })
     .onConflictDoUpdate({
       target: [settings.workspaceId, settings.key],
-      set: { value: sql`jsonb_build_object('n', coalesce((${settings.value}->>'n')::int, 0) + 1, 'at', ${now}::bigint)` },
-      where: sql`coalesce((${settings.value}->>'n')::int, 0) < ${FREE_TRIES} or coalesce((${settings.value}->>'at')::bigint, 0) < ${now - WAIT_MS}`,
+      set: { value: sql`json_object('n', coalesce(json_extract(${settings.value}, '$.n'), 0) + 1, 'at', ${now})` },
+      setWhere: sql`coalesce(json_extract(${settings.value}, '$.n'), 0) < ${FREE_TRIES} or coalesce(json_extract(${settings.value}, '$.at'), 0) < ${now - WAIT_MS}`,
     })
     .returning({ key: settings.key });
   return rows.length === 1;

@@ -16,9 +16,9 @@ outreach or contacts anyone.
 
 ## Run it
 
-Set `OWNER_EMAIL` and `OWNER_PASSWORD` (12+ characters) in `.env.local`, then `npm install` and `npm run dev`
-(embedded Postgres, no setup). Sign in with those details. Demo mode needs no other accounts or keys. See
-`.env.example` for every setting.
+Set `OWNER_EMAIL` and `OWNER_PASSWORD` (12+ characters) in `.dev.vars`, then `npm install` and `npm run dev`
+(Cloudflare's local runtime with a local D1 database, no setup). Sign in with those details. Demo mode needs no
+other accounts or keys. See `.dev.vars.example` for every setting.
 
 Checks: `npm run typecheck`, `npm run lint`, `npm test`.
 
@@ -115,8 +115,8 @@ The layers are separate on purpose:
   next to results (including when there are none), and on the Sources page. An empty live result says it is not
   evidence that no relevant tenders exist.
 - Pages are cached for 30 minutes (shared `source_cache` table). Switch off with `OPP_LIVE_FIND_A_TENDER=off`.
-- **Broader coverage needs** a background sync rather than read-at-search-time: a scheduled job (e.g. Vercel
-  Cron) that pages the API with `updatedFrom` incrementally and keeps a local index of open notices,
+- **Broader coverage needs** a background sync rather than read-at-search-time: a scheduled job (e.g. a Cloudflare
+  Cron Trigger) that pages the API with `updatedFrom` incrementally and keeps a local index of open notices,
   so every search covers *all* currently open tenders; plus Contracts Finder (legacy below-threshold, rate-limited)
   and devolved portals where they publish OCDS, then TED (EU) and SAM.gov (US) behind their own terms/keys.
   See `docs/LIVE-DATA-PLAN.md`.
@@ -191,7 +191,8 @@ saved items, lists, notes). The data layer still scopes every query by `workspac
 workspaces is tested, but there is no in-app way to host several organisations in one deployment. To resell,
 run **one deployment and one database per customer**:
 
-1. Create a new Vercel project from this repository (branch `opportunity-desk`) and a new Neon database.
+1. Create a new Cloudflare Worker from this repository (branch `opportunity-desk`) with its own D1 database
+   (change `name` and `database_name` in `wrangler.jsonc`, or deploy from a copy of the repository per customer).
 2. Set `OWNER_EMAIL`, `OWNER_PASSWORD`, `AUTH_SECRET`, `BRAND` (or add a brand file), and only the provider keys
    that customer is licensed for.
 3. The customer's owner signs in and adds their team under **Account & team**.
@@ -208,3 +209,6 @@ run **one deployment and one database per customer**:
 - Browser walkthrough (Playwright, desktop 1360px and mobile 390px): all four modules searched, detail
   pages, save, lists, notes, status, comparison, partial and failed states, live tender search, CSV export,
   brand previews, keyboard skip link, no horizontal overflow on mobile. Screenshots: `docs/review/`.
+- Cloudflare runtime: the built Worker run locally with `wrangler dev` and a local D1 database. The same
+  walkthrough passed, including a live tender search (202 results), sign-in throttling and the append-only
+  history trigger. Tests fail any query over D1's 100 bound-value limit.

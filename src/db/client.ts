@@ -1,84 +1,69 @@
 /**
  * Database connection.
  *
- *  - Production (Vercel + Neon, or any Postgres): set DATABASE_URL.
- *  - Local development: no setup — an embedded Postgres (PGlite) stores data in
- *    ./data/pglite.
- *  - Tests: in-memory PGlite.
+ *  - Cloudflare (production and `npm run dev`): the D1 database bound to the Worker as `DB`
+ *    (see wrangler.jsonc).
+ *  - Tests: in-memory SQLite (libsql), migrated with the same SQL files.
  *
- * The service layer only sees `Db` (Drizzle's Postgres query builder), so the
- * driver is swappable.
+ * The service layer only sees `Db` (Drizzle's async SQLite query builder), so the driver is swappable.
  */
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import path from "node:path";
-import { databaseUrl, directDatabaseUrl, missingHostedDatabase } from "@/lib/env";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "./schema";
 
-export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Db = BaseSQLiteDatabase<"async", any, typeof schema>;
 
-const MIGRATIONS = path.resolve(/*turbopackIgnore: true*/ process.cwd(), "drizzle");
+/**
+ * D1 accepts at most 100 bound values per statement. Multi-row inserts are split so each statement
+ * stays under it.
+ */
+export const MAX_BOUND_VALUES = 100;
 
-export { databaseUrl };
-
-/** Direct (unpooled) URL for migrations when the provider offers one. */
-function migrationUrl(): string | undefined {
-  return directDatabaseUrl() || databaseUrl();
+export function chunkRows<T extends object>(rows: T[], reserved = 0): T[][] {
+  if (!rows.length) return [];
+  const perRow = Math.max(1, Object.keys(rows[0]).length);
+  const size = Math.max(1, Math.floor((MAX_BOUND_VALUES - reserved) / perRow));
+  const out: T[][] = [];
+  for (let i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size));
+  return out;
 }
 
-export function localDataDir(): string {
-  return path.resolve(/*turbopackIgnore: true*/ process.cwd(), process.env.PGLITE_DIR ?? "data/pglite");
-}
-
-async function openPglite(dir?: string): Promise<Db> {
-  const { PGlite } = await import("@electric-sql/pglite");
-  const { drizzle } = await import("drizzle-orm/pglite");
-  const client = dir ? new PGlite(dir) : new PGlite();
-  return drizzle(client, { schema }) as unknown as Db;
-}
-
-async function openPostgres(url: string): Promise<Db> {
-  const { default: postgres } = await import("postgres");
-  const { drizzle } = await import("drizzle-orm/postgres-js");
-  // prepare:false keeps it compatible with transaction-mode poolers (Neon/Supabase pooled URLs).
-  const client = postgres(url, { prepare: false, max: 5 });
-  return drizzle(client, { schema }) as unknown as Db;
-}
-
-/** Open a database without running migrations. `":memory:"` gives a throwaway PGlite. */
-export async function connect(target?: string): Promise<Db> {
-  if (target === ":memory:") return openPglite();
-  if (target && /^postgres(ql)?:\/\//.test(target)) return openPostgres(target);
-  if (target) return openPglite(target);
-  const url = databaseUrl();
-  if (!url && missingHostedDatabase()) {
-    throw new Error("No database connected. In Vercel: Storage → create/connect a Neon database, then redeploy.");
+export class NoDatabaseError extends Error {
+  constructor() {
+    super("No database is bound to this Worker. Add a D1 binding named DB (see README → Cloudflare).");
   }
-  return url ? openPostgres(url) : openPglite(localDataDir());
 }
 
-/** Apply pending migrations. */
-export async function migrateDb(target?: string): Promise<Db> {
-  const url = target ?? migrationUrl();
-  if (url && /^postgres(ql)?:\/\//.test(url)) {
-    const { default: postgres } = await import("postgres");
-    const { drizzle } = await import("drizzle-orm/postgres-js");
-    const { migrate } = await import("drizzle-orm/postgres-js/migrator");
-    const client = postgres(url, { prepare: false, max: 1, onnotice: () => {} });
-    await migrate(drizzle(client), { migrationsFolder: MIGRATIONS });
-    await client.end();
-    return connect(target ?? databaseUrl());
+const cache = new WeakMap<object, Db>();
+
+/** The Worker's D1 database for this request. */
+export async function getDb(): Promise<Db> {
+  const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+  const { env } = await getCloudflareContext({ async: true });
+  const d1 = env.DB;
+  if (!d1) throw new NoDatabaseError();
+  let db = cache.get(d1);
+  if (!db) {
+    const { drizzle } = await import("drizzle-orm/d1");
+    db = drizzle(d1, { schema }) as unknown as Db;
+    cache.set(d1, db);
   }
-  const db = await connect(target);
-  const { migrate } = await import("drizzle-orm/pglite/migrator");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await migrate(db as any, { migrationsFolder: MIGRATIONS });
   return db;
 }
 
-const g = globalThis as unknown as { __odDb?: Promise<Db> };
-
-/** Process-wide connection (survives Next.js dev hot reloads). Migrations run at build/start, not here. */
-export function getDb(): Promise<Db> {
-  g.__odDb ??= connect();
-  return g.__odDb;
+/** A fresh, migrated in-memory database (tests). Fails any statement D1 would reject for too many values. */
+export async function memoryDb(): Promise<Db> {
+  const path = await import("node:path");
+  const { createClient } = await import("@libsql/client");
+  const { drizzle } = await import("drizzle-orm/libsql");
+  const { migrate } = await import("drizzle-orm/libsql/migrator");
+  const logger = {
+    logQuery(query: string, params: unknown[]) {
+      if (params.length > MAX_BOUND_VALUES) throw new Error(`${params.length} bound values (D1 allows ${MAX_BOUND_VALUES}): ${query.slice(0, 80)}`);
+    },
+  };
+  const db = drizzle(createClient({ url: ":memory:" }), { schema, logger });
+  await db.run("PRAGMA foreign_keys = ON");
+  await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "drizzle") });
+  return db as unknown as Db;
 }
