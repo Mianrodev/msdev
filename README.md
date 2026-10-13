@@ -39,7 +39,7 @@ The app is one Cloudflare Worker with one D1 database (binding `DB`), configured
    `opportunity-desk` (it must match `name` in `wrangler.jsonc`).
 2. Build settings: production branch `opportunity-desk`; **Build command** `npx opennextjs-cloudflare build`;
    **Deploy command** `npx opennextjs-cloudflare deploy && npx wrangler d1 migrations apply opportunity-desk --remote`.
-3. Deploy. The first deploy creates the D1 database `opportunity-desk` and sets up its tables.
+3. Deploy. The deploy command sets up or upgrades the tables in the D1 database named in `wrangler.jsonc`.
 4. In the Worker → **Settings → Variables and Secrets**, add **secrets** `OWNER_EMAIL`, `OWNER_PASSWORD`
    (12+ characters) and `AUTH_SECRET` (any long random string). Optional: `BRAND` (plain text).
 5. Open the `*.workers.dev` address (or add your own domain under **Settings → Domains & Routes**) and sign in.
@@ -47,8 +47,8 @@ The app is one Cloudflare Worker with one D1 database (binding `DB`), configured
 **From a terminal instead:** `npx wrangler login`, then `npm run deploy`, then
 `npx wrangler secret put OWNER_EMAIL` (and `OWNER_PASSWORD`, `AUTH_SECRET`).
 
-If the first deploy can't create the database itself, create it under **Storage & Databases → D1** with the
-name `opportunity-desk`, put its ID in `wrangler.jsonc` (`database_id`) and deploy again.
+`wrangler.jsonc` points at this deployment's D1 database (`database_id`). For a separate copy (another customer),
+create a new D1 database (`npx wrangler d1 create <name>`) and use its name and ID instead.
 
 **Cost:** Workers and D1 usage is billed to the Cloudflare account under its plan's included allowances
 (Workers Paid includes D1 reads, writes and storage); one team's searches use a small fraction of them. Nothing
