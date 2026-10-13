@@ -1,6 +1,5 @@
 /**
- * Automatic search (a Cloudflare Cron Trigger — see wrangler.jsonc and
- * cloudflare/worker.ts — or Vercel Cron, see vercel.json): for each person's space, search the
+ * Automatic search (Vercel Cron, see vercel.json): for each person's space, search the
  * job boards, then run the weekly check — the same as pressing "Find new leads".
  *
  * The scheduler calls this daily. On Mondays every space is searched (the owner's first), as
@@ -14,7 +13,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getDb } from "@/db/client";
 import { users } from "@/db/schema";
 import { OWNER_ID } from "@/lib/auth";
-import { onWorkers } from "@/lib/env";
 import { DEFAULT_WORKSPACE_ID, ensureWorkspace, type Ctx } from "@/services/context";
 import {
   claimScheduledRun,
@@ -40,8 +38,8 @@ const TOTAL_BUDGET_MS = 280_000;
 
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
-  // Hosted: the secret is required (a Cloudflare secret, or Vercel → Settings → Environment variables).
-  if (!secret && (process.env.VERCEL || onWorkers())) {
+  // Hosted: the secret is required (set CRON_SECRET in Vercel → Settings → Environment variables).
+  if (!secret && process.env.VERCEL) {
     console.error("weekly search: CRON_SECRET is not set, so the scheduler can't be trusted; refusing");
     return NextResponse.json({ ok: false }, { status: 503 });
   }

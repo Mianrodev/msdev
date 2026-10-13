@@ -30,12 +30,7 @@ export function directDatabaseUrl(): string | undefined {
   return find(UNPOOLED, ["DATABASE_URL_UNPOOLED", "POSTGRES_URL_NON_POOLING"]);
 }
 
-/** Running on Cloudflare Workers (the hosted app), as opposed to Node on a computer or in tests. */
-export function onWorkers(): boolean {
-  return typeof navigator !== "undefined" && navigator.userAgent === "Cloudflare-Workers";
-}
-
-/** Hosted (Cloudflare, or Vercel) without a database connected yet. */
+/** Hosted (Vercel) without a database connected yet. */
 export function missingHostedDatabase(): boolean {
-  return (onWorkers() || !!process.env.VERCEL) && !databaseUrl();
+  return !!process.env.VERCEL && !databaseUrl();
 }

@@ -1,10 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { databaseUrl, directDatabaseUrl, missingHostedDatabase, onWorkers } from "@/lib/env";
+import { afterEach, describe, expect, it } from "vitest";
+import { databaseUrl, directDatabaseUrl, missingHostedDatabase } from "@/lib/env";
 
 const saved = { ...process.env };
 afterEach(() => {
   process.env = { ...saved };
-  vi.unstubAllGlobals();
 });
 
 function only(vars: Record<string, string>) {
@@ -26,15 +25,5 @@ describe("database URL discovery", () => {
     only({ VERCEL: "1", SOME_DATABASE_URL: "mysql://x" });
     expect(databaseUrl()).toBeUndefined();
     expect(missingHostedDatabase()).toBe(true);
-  });
-  it("on Cloudflare Workers, also reports a missing database", () => {
-    only({});
-    expect(onWorkers()).toBe(false);
-    expect(missingHostedDatabase()).toBe(false);
-    vi.stubGlobal("navigator", { userAgent: "Cloudflare-Workers" });
-    expect(onWorkers()).toBe(true);
-    expect(missingHostedDatabase()).toBe(true);
-    only({ DATABASE_URL: "postgres://a" });
-    expect(missingHostedDatabase()).toBe(false);
   });
 });

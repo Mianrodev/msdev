@@ -12,7 +12,7 @@ const OUTBOUND = "The app never contacts anyone or submits anything (see src/cor
 const config = [
   ...nextVitals,
   ...nextTs,
-  { ignores: [".next/**", "node_modules/**", "drizzle/**", "data/**", "next-env.d.ts", ".open-next/**", ".wrangler/**", "cloudflare/**"] },
+  { ignores: [".next/**", "node_modules/**", "drizzle/**", "data/**", "next-env.d.ts"] },
   {
     files: ["src/**/*.{ts,tsx}", "scripts/**/*.ts", "tests/**/*.ts"],
     languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
