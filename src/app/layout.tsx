@@ -17,6 +17,7 @@ const LINKS = [
   { href: "/records?list=ready", label: "Leads" },
   { href: "/answers", label: "My answers" },
   { href: "/accounts", label: "Companies" },
+  { href: "/forge", label: "Forge Demo" },
   { href: "/connect", label: "Your AI" },
   { href: "/history", label: "Activity" },
   { href: "/help", label: "Help" },

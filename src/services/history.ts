@@ -4,7 +4,7 @@ import { actorLabel } from "@/core/types";
 import type { Ctx } from "./context";
 
 export interface HistoryEntry {
-  entityType: "record" | "target_account" | "rule" | "setting" | "import" | "reconciliation" | "pipeline_run";
+  entityType: "record" | "target_account" | "rule" | "setting" | "import" | "reconciliation" | "pipeline_run" | "forge_demo";
   entityId?: string | null;
   event: string;
   priorStatus?: string | null;

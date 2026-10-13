@@ -21,11 +21,14 @@ export function proxy(req: NextRequest) {
   }
   // The weekly scheduler and your AI have no login cookie; those routes check their own caller (see their files).
   // Invite links (/join/…) are how new team members get their first password.
+  // Forge demo websites (/p/…, and the JSON the GoHighLevel page loads) are public: the link is the access.
   if (
     pathname === "/login" ||
     pathname === "/api/cron/weekly" ||
     pathname.startsWith("/api/mcp/") ||
     pathname.startsWith("/join/") ||
+    pathname.startsWith("/p/") ||
+    pathname.startsWith("/api/forge/") ||
     req.cookies.has(SESSION_COOKIE)
   )
     return NextResponse.next();

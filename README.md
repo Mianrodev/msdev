@@ -152,6 +152,29 @@ loaded on every start.
   contacts, gaps, unmapped columns) and scrubs identity terms, emails and phone
   numbers. *Internal* CSV is everything, for your own backups.
 
+## Forge Demo (demo websites)
+
+**Forge Demo** (in the top menu) builds a one-page demo website for a local
+home-services business from just its name (plus trade, city and phone if you
+have them). Each demo gets:
+
+- a public link, `/p/<demo>`, to send or open on a sales call (no sign-in; archiving a demo switches the link off);
+- a link on your own GoHighLevel page, `<your page>?d=<demo>`, once that page is set up (below);
+- a ready-to-paste Google Chat message and tracker-sheet row.
+
+**Copy.** With `ANTHROPIC_API_KEY` set in the environment, Claude writes the copy
+for each business (about 1 minute and a few cents per site). Without it, sites
+are drafted from the built-in trade template. Claude only states facts you typed
+in; without real reviews, the page shows clearly-marked sample reviews.
+
+**GoHighLevel.** Make one blank page in GoHighLevel, add a full-width Custom
+JS/HTML element, and paste the code shown at the bottom of the Forge Demo page.
+Save that page's address on the same screen. The page then shows whichever demo
+its `?d=` names, so one GHL page serves every demo.
+
+Code: `src/forge/` (schema, generator, template, storage), pages in `src/app/forge/`,
+public routes `src/app/p/[slug]` and `src/app/api/forge/[slug]`.
+
 ## Business rules and where they're enforced
 
 | Rule | Enforcement |

@@ -308,6 +308,27 @@ export const importRows = pgTable(
   (t) => [index("import_rows_batch").on(t.batchId, t.sheet)],
 );
 
+/**
+ * Forge Demo: generated demo websites. The slug is the public link
+ * (/p/<slug>, or the GHL page with ?d=<slug>), so it's unique across workspaces.
+ * Demos are archived, not deleted.
+ */
+export const forgeDemos = pgTable(
+  "forge_demos",
+  {
+    slug: text("slug").primaryKey(),
+    workspaceId: workspaceId(),
+    businessName: text("business_name").notNull(),
+    intake: jsonb("intake").$type<Record<string, unknown>>().notNull(),
+    content: jsonb("content").$type<Record<string, unknown>>().notNull(),
+    writtenBy: text("written_by", { enum: ["claude", "draft"] }).notNull(),
+    status: text("status", { enum: ["active", "archived"] }).notNull().default("active"),
+    createdBy: text("created_by").notNull(),
+    ...timestamps,
+  },
+  (t) => [index("forge_demos_ws").on(t.workspaceId, t.status)],
+);
+
 export type RecordRow = typeof records.$inferSelect;
 export type NewRecordRow = typeof records.$inferInsert;
 export type TargetAccountRow = typeof targetAccounts.$inferSelect;
@@ -316,3 +337,4 @@ export type HistoryRow = typeof history.$inferSelect;
 
 export type UserRow = typeof users.$inferSelect;
 export type InviteRow = typeof invites.$inferSelect;
+export type ForgeDemoRow = typeof forgeDemos.$inferSelect;
