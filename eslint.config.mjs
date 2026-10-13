@@ -1,0 +1,44 @@
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+/**
+ * Besides Next's defaults, this enforces the network boundary in code: application source may not
+ * make outbound network calls or send mail. The app researches; people contact others themselves.
+ * The read-only exceptions: src/sources/opportunities/safe-fetch.ts (allowlisted, private-network-
+ * blocked GETs for data providers) and src/sources/opportunities/ai-enricher.ts (optional AI summaries).
+ */
+const OUTBOUND = "Network access goes through src/sources/opportunities/safe-fetch.ts (see src/core/permissions.ts).";
+
+const config = [
+  ...nextVitals,
+  ...nextTs,
+  { ignores: [".next/**", "node_modules/**", "drizzle/**", "data/**", "next-env.d.ts"] },
+  {
+    files: ["src/**/*.{ts,tsx}", "scripts/**/*.ts", "tests/**/*.ts"],
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": ["error", { checksVoidReturn: false }],
+      "@typescript-eslint/await-thenable": "error",
+    },
+  },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/sources/opportunities/safe-fetch.ts", "src/sources/opportunities/ai-enricher.ts"],
+    rules: {
+      "no-restricted-globals": ["error", { name: "fetch", message: OUTBOUND }, { name: "XMLHttpRequest", message: OUTBOUND }, { name: "WebSocket", message: OUTBOUND }],
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: ["http", "https", "net", "tls", "dgram", "node:http", "node:https", "node:net", "node:tls", "node:dgram", "nodemailer", "axios", "undici", "node-fetch", "got", "@anthropic-ai/sdk"].map(
+            (name) => ({ name, message: OUTBOUND }),
+          ),
+          patterns: [{ group: ["@anthropic-ai/sdk/*"], message: OUTBOUND }],
+        },
+      ],
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", destructuredArrayIgnorePattern: "^_" }],
+    },
+  },
+];
+
+export default config;
