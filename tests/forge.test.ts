@@ -113,7 +113,7 @@ describe("Forge demo — template", () => {
   });
 
   it("builds a loader that calls this app's API", () => {
-    expect(loaderSnippet("https://crm.example.com/")).toContain('"https://crm.example.com/api/forge/"');
+    expect(loaderSnippet("https://sites.example.com/api/")).toContain('fetch("https://sites.example.com/api/" + encodeURIComponent(d))');
   });
 });
 

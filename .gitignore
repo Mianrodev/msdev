@@ -13,3 +13,8 @@ next-env.d.ts
 # Source workbooks may contain personal data — keep them out of git.
 *.xlsx
 !tests/fixtures/*.xlsx
+
+# Cloudflare (forge-sites worker)
+.wrangler/
+.dev.vars*
+cloudflare/forge-sites/.dev.vars*

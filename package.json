@@ -2,7 +2,7 @@
   "name": "prospect-crm",
   "version": "0.1.0",
   "private": true,
-  "description": "Lead/prospect CRM: discovery → screen → triage → verify pipeline with editable criteria, dedup, reconciliation and an append-only audit log.",
+  "description": "Lead/prospect CRM: discovery \u2192 screen \u2192 triage \u2192 verify pipeline with editable criteria, dedup, reconciliation and an append-only audit log.",
   "scripts": {
     "dev": "npm run db:migrate && next dev",
     "build": "next build",
@@ -14,7 +14,9 @@
     "fixture": "tsx scripts/make-fixture-workbook.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sites:dev": "wrangler dev -c cloudflare/forge-sites/wrangler.jsonc",
+    "sites:deploy": "wrangler deploy -c cloudflare/forge-sites/wrangler.jsonc"
   },
   "engines": {
     "node": ">=20.9"
@@ -40,6 +42,7 @@
     "eslint-config-next": "^16.3.7",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.2",
+    "wrangler": "^4.150.0"
   }
 }

@@ -3,7 +3,7 @@ import { createDemoAction, saveGhlPageAction } from "./actions";
 import { CopyButton, SubmitButton } from "@/components/client";
 import { fmtWhen } from "@/components/plain";
 import { Flash, PageHeader, type SearchParams } from "@/components/ui";
-import { appBaseUrl } from "@/forge/base-url";
+import { demoSites } from "@/forge/base-url";
 import { canUseAi } from "@/forge/generate";
 import { IntakeFields } from "@/forge/intake-fields";
 import { loaderSnippet } from "@/forge/loader";
@@ -17,7 +17,7 @@ export const maxDuration = 300;
 export default async function ForgePage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
   const ctx = await getCtx();
-  const [demos, ghlPage, base] = await Promise.all([listDemos(ctx), getGhlPageUrl(ctx), appBaseUrl()]);
+  const [demos, ghlPage, sites] = await Promise.all([listDemos(ctx), getGhlPageUrl(ctx), demoSites()]);
   const ai = canUseAi();
   return (
     <>
@@ -67,10 +67,10 @@ export default async function ForgePage({ searchParams }: { searchParams: Search
                     <td>{String((d.content as { industry?: string }).industry ?? "")}</td>
                     <td className="small muted">{fmtWhen(d.createdAt)}</td>
                     <td className="row">
-                      <a href={`/p/${d.slug}`} target="_blank" rel="noreferrer">
+                      <a href={sites.page(d.slug)} target="_blank" rel="noreferrer">
                         Open site ↗
                       </a>
-                      <CopyButton text={`${base}/p/${d.slug}`} label="Copy link" />
+                      <CopyButton text={sites.page(d.slug)} label="Copy link" />
                     </td>
                   </tr>
                 ))}
@@ -99,9 +99,9 @@ export default async function ForgePage({ searchParams }: { searchParams: Search
         </form>
         <div className="spread">
           <b className="small">Code for the Custom JS/HTML element</b>
-          <CopyButton text={loaderSnippet(base)} label="Copy code" />
+          <CopyButton text={loaderSnippet(sites.api)} label="Copy code" />
         </div>
-        <pre className="package mono small">{loaderSnippet(base)}</pre>
+        <pre className="package mono small">{loaderSnippet(sites.api)}</pre>
       </section>
     </>
   );

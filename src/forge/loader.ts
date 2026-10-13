@@ -3,8 +3,8 @@
  * element). It reads ?d=<slug> from the page address, fetches that demo from
  * this app and draws it, so one GHL page shows every demo.
  */
-export function loaderSnippet(appBaseUrl: string): string {
-  const api = `${appBaseUrl.replace(/\/+$/, "")}/api/forge/`;
+export function loaderSnippet(apiBase: string): string {
+  const api = apiBase;
   return `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap">
 <div id="forge-site" style="position:relative;width:100vw;left:50%;margin-left:-50vw;min-height:100vh"></div>
 <script>
