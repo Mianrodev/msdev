@@ -4,7 +4,7 @@ import { CopyButton, SubmitButton } from "@/components/client";
 import { fmtWhen } from "@/components/plain";
 import { BackLink, Flash, PageHeader, type SearchParams } from "@/components/ui";
 import { appBaseUrl } from "@/forge/base-url";
-import { canUseClaude } from "@/forge/generate";
+import { canUseAi } from "@/forge/generate";
 import { IntakeFields } from "@/forge/intake-fields";
 import { getDemo, getGhlPageUrl, ghlLink } from "@/forge/store";
 import { getCtx } from "@/services/request";
@@ -32,7 +32,7 @@ export default async function DemoPage({ params, searchParams }: { params: Promi
       <BackLink href="/forge">Back to Forge Demo</BackLink>
       <PageHeader
         title={i.businessName}
-        intro={`${demo.content.industry}${i.city ? ` · ${i.city}` : ""} · ${demo.writtenBy === "claude" ? "Written by Claude" : "Drafted without AI"} · updated ${fmtWhen(demo.updatedAt)}`}
+        intro={`${demo.content.industry}${i.city ? ` · ${i.city}` : ""} · ${demo.writtenBy === "ai" ? "Written by Gemini" : "Drafted without AI"} · updated ${fmtWhen(demo.updatedAt)}`}
       >
         <a className="button primary" href={direct} target="_blank" rel="noreferrer">
           Open site ↗
@@ -85,7 +85,7 @@ export default async function DemoPage({ params, searchParams }: { params: Promi
           <input type="hidden" name="slug" value={slug} />
           <IntakeFields v={i} />
           <div style={{ marginTop: "1rem" }}>
-            <SubmitButton pending={canUseClaude() ? "Rewriting… (up to a minute)" : "Rebuilding…"}>Rewrite site</SubmitButton>
+            <SubmitButton pending={canUseAi() ? "Rewriting… (up to a minute)" : "Rebuilding…"}>Rewrite site</SubmitButton>
           </div>
         </form>
       </section>

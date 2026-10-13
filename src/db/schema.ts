@@ -321,7 +321,7 @@ export const forgeDemos = pgTable(
     businessName: text("business_name").notNull(),
     intake: jsonb("intake").$type<Record<string, unknown>>().notNull(),
     content: jsonb("content").$type<Record<string, unknown>>().notNull(),
-    writtenBy: text("written_by", { enum: ["claude", "draft"] }).notNull(),
+    writtenBy: text("written_by", { enum: ["ai", "draft"] }).notNull(),
     status: text("status", { enum: ["active", "archived"] }).notNull().default("active"),
     createdBy: text("created_by").notNull(),
     ...timestamps,

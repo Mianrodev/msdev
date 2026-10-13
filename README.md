@@ -162,9 +162,10 @@ have them). Each demo gets:
 - a link on your own GoHighLevel page, `<your page>?d=<demo>`, once that page is set up (below);
 - a ready-to-paste Google Chat message and tracker-sheet row.
 
-**Copy.** With `ANTHROPIC_API_KEY` set in the environment, Claude writes the copy
-for each business (about 1 minute and a few cents per site). Without it, sites
-are drafted from the built-in trade template. Claude only states facts you typed
+**Copy.** With `GEMINI_API_KEY` (a Google AI Studio key) set in the environment,
+Gemini writes the copy for each business (`gemini-3.8-flash` by default; set
+`GEMINI_MODEL` to change it). Without it, sites are drafted from the built-in
+trade template. The AI is told to state only facts you typed
 in; without real reviews, the page shows clearly-marked sample reviews.
 
 **GoHighLevel.** Make one blank page in GoHighLevel, add a full-width Custom

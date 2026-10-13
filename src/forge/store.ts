@@ -20,7 +20,7 @@ export function toDemo(r: ForgeDemoRow): Demo {
     slug: r.slug,
     intake: Intake.parse(r.intake),
     content: SiteContent.parse(r.content),
-    writtenBy: r.writtenBy,
+    writtenBy: r.writtenBy === "draft" ? "draft" : "ai",
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -58,7 +58,7 @@ export async function createDemo(ctx: Ctx, input: Intake): Promise<Demo> {
     entityType: "forge_demo",
     entityId: slug,
     event: "created",
-    reason: `Demo website for ${intake.businessName} (${writtenBy === "claude" ? "written by Claude" : "drafted without AI"})`,
+    reason: `Demo website for ${intake.businessName} (${writtenBy === "ai" ? "written by Gemini" : "drafted without AI"})`,
   });
   return toDemo(row);
 }

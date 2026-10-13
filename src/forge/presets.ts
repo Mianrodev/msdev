@@ -1,7 +1,7 @@
 /**
  * Starting points per home-services trade: default colours, services and
  * common customer problems. Used to draft a site without AI, and given to
- * Claude as a hint so its copy stays on-trade.
+ * the AI as a hint so its copy stays on-trade.
  */
 import type { IconName } from "./schema";
 

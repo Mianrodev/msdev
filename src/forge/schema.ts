@@ -3,13 +3,13 @@
  *
  * `Intake` is what a person types in (only the business name is required).
  * `SiteContent` is the full set of words for every section of the template —
- * written by Claude from the intake, or drafted from it without AI when no
+ * written by Gemini from the intake, or drafted from it without AI when no
  * API key is set. The template (render.ts) only ever reads `SiteContent`, so
  * a site can be regenerated or hand-edited without touching the design.
  */
 import { z } from "zod";
 
-/** Icons the template can draw. Claude picks one per service / reason. */
+/** Icons the template can draw. The AI picks one per service / reason. */
 export const ICONS = [
   "wrench",
   "drop",
@@ -119,8 +119,8 @@ export interface Demo {
   slug: string;
   intake: Intake;
   content: SiteContent;
-  /** "claude" when Claude wrote the copy; "draft" when it was filled in without AI. */
-  writtenBy: "claude" | "draft";
+  /** "ai" when Gemini wrote the copy; "draft" when it was filled in without AI. */
+  writtenBy: "ai" | "draft";
   createdAt: string;
   updatedAt: string;
 }

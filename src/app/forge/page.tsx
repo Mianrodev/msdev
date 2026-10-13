@@ -4,21 +4,21 @@ import { CopyButton, SubmitButton } from "@/components/client";
 import { fmtWhen } from "@/components/plain";
 import { Flash, PageHeader, type SearchParams } from "@/components/ui";
 import { appBaseUrl } from "@/forge/base-url";
-import { canUseClaude } from "@/forge/generate";
+import { canUseAi } from "@/forge/generate";
 import { IntakeFields } from "@/forge/intake-fields";
 import { loaderSnippet } from "@/forge/loader";
 import { getGhlPageUrl, listDemos } from "@/forge/store";
 import { getCtx } from "@/services/request";
 
 export const dynamic = "force-dynamic";
-// Claude can take up to a minute or so to write a site.
+// Gemini can take up to a minute or so to write a site.
 export const maxDuration = 300;
 
 export default async function ForgePage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
   const ctx = await getCtx();
   const [demos, ghlPage, base] = await Promise.all([listDemos(ctx), getGhlPageUrl(ctx), appBaseUrl()]);
-  const ai = canUseClaude();
+  const ai = canUseAi();
   return (
     <>
       <Flash sp={sp} />
@@ -31,8 +31,8 @@ export default async function ForgePage({ searchParams }: { searchParams: Search
         <h2 style={{ marginTop: 0 }}>New demo website</h2>
         {!ai && (
           <p className="note small">
-            No Anthropic API key is set, so sites are drafted from the trade template without AI. Add <code>ANTHROPIC_API_KEY</code> to
-            the environment for copy written for each business.
+            No Gemini API key is set, so sites are drafted from the trade template without AI. Add <code>GEMINI_API_KEY</code> (from
+            Google AI Studio) to the environment for copy written for each business.
           </p>
         )}
         <form action={createDemoAction} className="stack">

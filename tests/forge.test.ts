@@ -48,22 +48,29 @@ describe("Forge demo — content", () => {
     expect(parseReviews("")).toEqual([]);
   });
 
+  it("sends Gemini a schema the parser and template agree on", async () => {
+    const { z } = await import("zod");
+    const schema = z.toJSONSchema(SiteContent) as { properties: Record<string, unknown>; required: string[] };
+    expect(schema.required).toEqual(Object.keys(SiteContent.shape));
+    expect(JSON.stringify(schema)).not.toContain('"pattern"');
+  });
+
   it("rejects a non-colour and a non-link", () => {
     expect(Intake.safeParse({ businessName: "Xo Co", primaryColor: "blue" }).success).toBe(false);
     expect(Intake.safeParse({ businessName: "Xo Co", logoUrl: "not a link" }).success).toBe(false);
   });
 
   describe("without an API key", () => {
-    const saved = { key: process.env.ANTHROPIC_API_KEY, token: process.env.ANTHROPIC_AUTH_TOKEN };
+    const saved = { key: process.env.GEMINI_API_KEY, google: process.env.GOOGLE_API_KEY };
     beforeEach(() => {
-      delete process.env.ANTHROPIC_API_KEY;
-      delete process.env.ANTHROPIC_AUTH_TOKEN;
+      delete process.env.GEMINI_API_KEY;
+      delete process.env.GOOGLE_API_KEY;
     });
     afterEach(() => {
-      if (saved.key !== undefined) process.env.ANTHROPIC_API_KEY = saved.key;
-      if (saved.token !== undefined) process.env.ANTHROPIC_AUTH_TOKEN = saved.token;
+      if (saved.key !== undefined) process.env.GEMINI_API_KEY = saved.key;
+      if (saved.google !== undefined) process.env.GOOGLE_API_KEY = saved.google;
     });
-    it("drafts the site instead of calling Claude", async () => {
+    it("drafts the site instead of calling Gemini", async () => {
       const r = await generateContent(Intake.parse({ businessName: "Acme Roofing" }));
       expect(r.writtenBy).toBe("draft");
       expect(r.content.industry).toBe("Roofing");
@@ -124,8 +131,9 @@ describe("Forge demo — storage", () => {
   });
 
   it("saves, lists, rewrites and archives a demo", async () => {
-    const saved = process.env.ANTHROPIC_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
+    const saved = { key: process.env.GEMINI_API_KEY, google: process.env.GOOGLE_API_KEY };
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
     try {
       const ctx = await testCtx();
       const d = await createDemo(ctx, Intake.parse({ businessName: "Acme Plumbing", city: "Conway" }));
@@ -142,7 +150,8 @@ describe("Forge demo — storage", () => {
       expect(await listDemos(ctx)).toEqual([]);
       expect(await getPublicDemo(ctx.db, "../etc")).toBeNull();
     } finally {
-      if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+      if (saved.key !== undefined) process.env.GEMINI_API_KEY = saved.key;
+      if (saved.google !== undefined) process.env.GOOGLE_API_KEY = saved.google;
     }
   });
 });
