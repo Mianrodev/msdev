@@ -2,10 +2,10 @@
   "name": "prospect-crm",
   "version": "0.1.0",
   "private": true,
-  "description": "Lead/prospect CRM: discovery → screen → triage → verify pipeline with editable criteria, dedup, reconciliation and an append-only audit log.",
+  "description": "Lead/prospect CRM: discovery \u2192 screen \u2192 triage \u2192 verify pipeline with editable criteria, dedup, reconciliation and an append-only audit log.",
   "scripts": {
     "dev": "npm run db:migrate && next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "vercel-build": "npm run db:migrate && next build",
     "start": "npm run db:migrate && next start",
     "db:generate": "drizzle-kit generate",
@@ -14,7 +14,10 @@
     "fixture": "tsx scripts/make-fixture-workbook.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "cf:build": "npm run db:migrate && opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare build && wrangler dev",
+    "cf:deploy": "npm run cf:build && wrangler deploy"
   },
   "engines": {
     "node": ">=20.9"
@@ -24,7 +27,7 @@
     "@google/genai": "^2.29.1",
     "drizzle-orm": "^0.45.3",
     "exceljs": "^4.4.0",
-    "next": "^16.3.7",
+    "next": "^16.3.8",
     "postgres": "^3.4.9",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -32,14 +35,16 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.20.11",
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9.39.5",
-    "eslint-config-next": "^16.3.7",
+    "eslint-config-next": "^16.3.8",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.2",
+    "wrangler": "^4.150.0"
   }
 }

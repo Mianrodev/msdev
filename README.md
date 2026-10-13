@@ -10,28 +10,49 @@ works for sales leads, partnerships or recruiting pipelines. Every table is
 scoped by `workspace_id`, so multi-tenant accounts can be added later without
 rewriting the data layer.
 
-It runs online (Vercel + a free Neon Postgres database) or on a computer.
+It runs online (Cloudflare Workers + a free Neon Postgres database) or on a computer.
 
 **This tool only researches and prepares — it never acts.** It never submits
 anything or contacts anyone. You approve and send outreach yourself; the app
 only records that you did.
 
-## Put it online (Vercel + free Neon database)
+## Put it online (Cloudflare Workers + free Neon database)
 
-1. In Vercel: **Add New… → Project**, pick this GitHub repository, then **Deploy**.
-   The site will say a database needs connecting. That's expected.
-2. In the project: **Storage → Create Database → Neon (Postgres)**, then connect it to
-   the project. This sets `DATABASE_URL` automatically.
-3. **Deployments → ⋯ → Redeploy.** Every deploy sets up and upgrades the database
-   automatically, before the new version goes live.
-4. Open the site **right away**. The first visit asks you to create your password, and
-   whoever does this first owns the app. After that, everyone must sign in.
+The app runs on Cloudflare Workers through the OpenNext adapter (`wrangler.jsonc`,
+`open-next.config.ts`, `cloudflare/worker.ts`). The database stays on Neon (or any
+Postgres).
+
+1. **Database.** Create a free project at neon.tech and copy its connection string
+   (`postgres://…`). If you're coming from Vercel, use the same database as before; nothing
+   needs moving.
+2. **Connect the repo.** In Cloudflare: **Workers & Pages → Create → Import a repository**,
+   pick this GitHub repository, then set:
+   - Build command: `npm run cf:build`
+   - Deploy command: `npx wrangler deploy`
+   - **Build variables:** `DATABASE_URL` (the build sets up and upgrades the database
+     before the new version goes live).
+3. **Runtime secrets.** In the Worker → **Settings → Variables and Secrets**, add `DATABASE_URL`
+   again, and `CRON_SECRET` (any long random string; the daily search refuses to run
+   without it). Optional: `GEMINI_API_KEY` (Forge Demo copy), `APP_PASSWORD`.
+4. Deploy, then open the site **right away**. The first visit asks you to create your
+   password, and whoever does this first owns the app. After that, everyone must sign in.
 5. Go to **Import** and upload the tracker workbook.
 6. In **Rules & settings → Redaction**, add the identity terms that must never appear in
    shared exports.
 
+The daily search is a Cloudflare Cron Trigger (`triggers.crons` in `wrangler.jsonc`, 02:30
+UTC). To try the Cloudflare build on a computer: put the same variables in `.dev.vars`,
+then `npm run cf:preview`.
+
+**Plan.** The bundle fits the Workers Free plan's size limit, but the Free plan allows only
+10 ms of CPU time per request, which server-rendered pages and the daily search can exceed.
+Use Workers Paid if you see "exceeded CPU" errors.
+
 The password is stored only as a salted hash, and you can change it in *Rules &
 settings*. Optionally, an `APP_PASSWORD` environment variable overrides it.
+
+(Vercel still works: `vercel.json` keeps its cron, and the steps are the same as before:
+import the repo, connect a Neon database, redeploy.)
 
 ## Run it on a computer (optional)
 
@@ -109,10 +130,10 @@ loaded on every start.
      (`src/sources/job-sites.ts`).
   4. Runs the weekly update below.
 
-  It also runs by itself every Monday at 08:00 India time through Vercel Cron
-  (`vercel.json` → `/api/cron/weekly`). `CRON_SECRET` must be set in Vercel
-  (Settings → Environment variables); the route refuses to run without it when
-  hosted. Locally, Vercel's scheduler user agent is enough.
+  It also runs by itself every Monday at 08:00 India time through a Cloudflare
+  Cron Trigger (`wrangler.jsonc` → `cloudflare/worker.ts` → `/api/cron/weekly`;
+  on Vercel, `vercel.json`). `CRON_SECRET` must be set as a secret; the route
+  refuses to run without it when hosted. Locally, Vercel's scheduler user agent is enough.
   LinkedIn and other sites can't be searched this way. Add those leads by hand.
 - **Run update** is the weekly sorting step. It replaces the workbook's
   "Update this week's prospect tracker" trigger. In one transaction it:

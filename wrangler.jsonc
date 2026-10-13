@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "msdev",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    // Self-reference, required by OpenNext (name must match "name" above).
+    { "binding": "WORKER_SELF_REFERENCE", "service": "msdev" }
+  ],
+  // Daily at 02:30 UTC — the weekly search (Mondays) plus catch-up runs, as on Vercel.
+  "triggers": { "crons": ["30 2 * * *"] },
+  "observability": { "enabled": true }
+  // Secrets (set in the Cloudflare dashboard → Workers → msdev → Settings → Variables, or `wrangler secret put`):
+  //   DATABASE_URL     the Neon (or any Postgres) connection string
+  //   CRON_SECRET      any long random string
+  //   GEMINI_API_KEY   optional, for Forge Demo copy
+  //   APP_PASSWORD     optional
+}

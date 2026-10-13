@@ -11,7 +11,8 @@
  */
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import path from "node:path";
-import { databaseUrl, directDatabaseUrl, missingHostedDatabase } from "@/lib/env";
+import { cache } from "react";
+import { databaseUrl, directDatabaseUrl, missingHostedDatabase, onWorkers } from "@/lib/env";
 import * as schema from "./schema";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -40,7 +41,8 @@ async function openPostgres(url: string): Promise<Db> {
   const { default: postgres } = await import("postgres");
   const { drizzle } = await import("drizzle-orm/postgres-js");
   // prepare:false keeps it compatible with transaction-mode poolers (Neon/Supabase pooled URLs).
-  const client = postgres(url, { prepare: false, max: 5 });
+  // On Workers a connection can't outlive its request, so each request gets one of its own.
+  const client = postgres(url, { prepare: false, max: onWorkers() ? 1 : 5 });
   return drizzle(client, { schema }) as unknown as Db;
 }
 
@@ -77,8 +79,16 @@ export async function migrateDb(target?: string): Promise<Db> {
 
 const g = globalThis as unknown as { __crmDb?: Promise<Db> };
 
-/** Process-wide connection (survives Next.js dev hot reloads). Migrations run at build/start, not here. */
+/** Cloudflare Workers can't share a connection between requests: one per request (per render). */
+const perRequest = cache(() => connect());
+
+/**
+ * The app's database. On a computer: one process-wide connection (survives
+ * Next.js dev hot reloads). On Cloudflare: a fresh connection per request.
+ * Migrations run at build/start, not here.
+ */
 export function getDb(): Promise<Db> {
+  if (onWorkers()) return perRequest();
   g.__crmDb ??= connect();
   return g.__crmDb;
 }

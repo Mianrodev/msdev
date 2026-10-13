@@ -13,3 +13,8 @@ next-env.d.ts
 # Source workbooks may contain personal data — keep them out of git.
 *.xlsx
 !tests/fixtures/*.xlsx
+
+# Cloudflare build output
+.open-next/
+.wrangler/
+.dev.vars*
