@@ -15,8 +15,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "sites:dev": "wrangler dev -c cloudflare/forge-sites/wrangler.jsonc",
-    "sites:deploy": "wrangler deploy -c cloudflare/forge-sites/wrangler.jsonc"
+    "forge:dev": "wrangler dev -c cloudflare/forge/wrangler.jsonc",
+    "forge:deploy": "wrangler d1 migrations apply forge-demo --remote -c cloudflare/forge/wrangler.jsonc && wrangler deploy -c cloudflare/forge/wrangler.jsonc"
   },
   "engines": {
     "node": ">=20.9"

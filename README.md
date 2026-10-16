@@ -173,24 +173,16 @@ JS/HTML element, and paste the code shown at the bottom of the Forge Demo page.
 Save that page's address on the same screen. The page then shows whichever demo
 its `?d=` names, so one GHL page serves every demo.
 
-**Serving demos from Cloudflare (free).** The public demo websites can run on a
-tiny Cloudflare Worker (`cloudflare/forge-sites/`) that reads the same database. It uses
-about 1 ms of CPU per request (the Workers Free plan allows 10 ms) and caches pages
-for a minute. To set it up once:
-
-1. `npx wrangler login`, then `npx wrangler secret put DATABASE_URL -c cloudflare/forge-sites/wrangler.jsonc`
-   (the same connection string the CRM uses).
-2. `npm run sites:deploy`. It prints the address, e.g. `https://forge-sites.<you>.workers.dev`
-   (you can add your own domain in the Cloudflare dashboard).
-3. In the CRM's hosting settings, set `FORGE_SITES_URL` to that address and redeploy.
-   Links, and the GoHighLevel code on the Forge Demo page, then point at Cloudflare.
-   Paste the new code into the GoHighLevel page.
-
-Without `FORGE_SITES_URL`, the CRM serves demos itself (`/p/<demo>`), as before.
+**Standalone app on Cloudflare (free).** `cloudflare/forge/` is Forge Demo as its own
+small app on the Workers Free plan, with its demos in Cloudflare D1: sign-in with a team
+password, new demo, demo list, share links, GoHighLevel setup, and the public sites at
+`/s/<demo>`. Deploy with `npm run forge:deploy` (applies database migrations, then deploys).
+Secrets, set in Cloudflare → Workers → forge-demo → Settings → Variables and Secrets:
+`FORGE_PASSWORD` (sign-in) and `GEMINI_API_KEY` (optional, AI-written copy).
 
 Code: `src/forge/` (schema, generator, template, storage), pages in `src/app/forge/`,
-public routes `src/app/p/[slug]` and `src/app/api/forge/[slug]`, Cloudflare worker in
-`cloudflare/forge-sites/`.
+public routes `src/app/p/[slug]` and `src/app/api/forge/[slug]`, Cloudflare app in
+`cloudflare/forge/` (shares `src/forge/` for the template and copy).
 
 ## Business rules and where they're enforced
 

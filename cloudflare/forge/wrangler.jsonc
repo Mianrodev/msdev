@@ -1,0 +1,21 @@
+{
+  // Forge Demo — the whole app on the Cloudflare Workers Free plan.
+  // Deploy:  npm run forge:deploy        (applies database migrations, then deploys)
+  // Secrets: FORGE_PASSWORD (sign-in), GEMINI_API_KEY (optional, AI copy)
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "forge-demo",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "forge-demo",
+      "database_id": "30b086b7-ae81-4fe4-aa14-45af57c4f1e3",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": { "GEMINI_MODEL": "gemini-3.8-flash" }
+}
